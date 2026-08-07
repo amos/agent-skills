@@ -134,6 +134,7 @@ import { useRef, useState } from "react";
 import {
   AmosCreditCardPaymentMethodForm,
   confirmPaymentIntent,
+  resetForm,
   validateForm,
 } from "@amos.com/react-amos-js";
 import type { ConfirmationResult } from "@amos.com/react-amos-js";
@@ -156,6 +157,12 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
     }
     // incomplete: field_errors | validation_failed — shown in iframe; unlock UI
     setError(null);
+  }
+
+  function onPayAgain() {
+    setDone(false);
+    setError(null);
+    resetForm({ iframeRef });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -196,8 +203,13 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         onResult={handleResult}
       />
       {error ? <p role="alert">{error}</p> : null}
-      {done ? <p>Payment succeeded.</p> : null}
-      <button type="submit" disabled={processing}>
+      {done ? (
+        <p>
+          Payment succeeded.{" "}
+          <button type="button" onClick={onPayAgain}>Pay again</button>
+        </p>
+      ) : null}
+      <button type="submit" disabled={processing || done}>
         {processing ? "Processing…" : "Pay now"}
       </button>
     </form>
@@ -328,14 +340,17 @@ import {
   mountAmosCreditCardPaymentMethodForm,
   validateForm,
   confirmPaymentIntent,
+  resetForm,
 } from "@amos.com/amos-js";
 
 const form = mountAmosCreditCardPaymentMethodForm("#card-form", {
   renderToken: RENDER_TOKEN,
   additionalFields: { cardholderName: true },
   onResult: (result) => {
-    if (result.status === "succeeded") console.log(result.paymentIntent.id);
-    else if (result.status === "failed") console.error(result.errorMessage);
+    if (result.status === "succeeded") {
+      console.log(result.paymentIntent.id);
+      // Optional: resetForm({ iframe: form.iframe }) before another payment
+    } else if (result.status === "failed") console.error(result.errorMessage);
     else if (result.status === "incomplete") console.log(result.reason);
   },
 });

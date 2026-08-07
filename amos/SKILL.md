@@ -6,8 +6,8 @@ description: >-
   Amos, mounting card/bank/Google Pay/Apple Pay iframes, wiring
   @amos.com/amos-js / @amos.com/react-amos-js / @amos.com/node, creating
   payment intents or setup intents (save a payment method without charging),
-  confirming via embed tokens and onResult, calling pay.amos.com, or debugging
-  blank iframes / confirm failures / Signature has expired.
+  confirming via embed tokens and onResult, calling pay.amos.com, resetForm,
+  or debugging blank iframes / confirm failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -21,7 +21,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` / `@amos.com/react-amos-js` (~0.9.x), `@amos.com/node` (~0.1.x). Prefer the installed package README + types over inventing APIs.
+Client packages (current majors): `@amos.com/amos-js` (~0.9.7), `@amos.com/react-amos-js` (~0.9.6), `@amos.com/node` (~0.1.x). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -138,6 +138,19 @@ All mounts/components take a single required **`onResult: (result: ConfirmationR
 
 Removed (do not use): `onPaymentIntentConfirmationSucceeded`, `onSetupIntentConfirmationSucceeded`, `onConfirmationFailed`.
 
+`onResult` is how **your page** learns that an interactive confirm attempt finished so you can run **your own UX** (stop spinners, show a thank-you screen, show a top-level error banner, enable “pay again”). It is **not** settlement proof — verify charge / saved PM via webhook or server retrieve before fulfilling.
+
+### Where errors appear vs what the host does
+
+| Situation | Where the customer sees it | What `onResult` tells the host |
+|-----------|----------------------------|--------------------------------|
+| Missing/invalid card or bank fields | **Under the fields inside the Amos iframe** (before or during confirm) | `status: "incomplete"`, `reason: "field_errors"` — unlock UI; **do not** duplicate field errors on the host page; customer fixes in the iframe and retries |
+| Recoverable confirm validation | Same — inline in the iframe | `status: "incomplete"`, `reason: "validation_failed"` — same host action |
+| Non-recoverable / API failure | Host page (or toast) via **`errorMessage`** | `status: "failed"` — show `errorMessage`; unlock UI |
+| Interactive confirm succeeded | Your success UX (thank-you, redirect, etc.) | `status: "succeeded"` with `paymentIntent` or `setupIntent` — then **verify on your server** before treating as paid or saved |
+
+Field-level messaging stays in the iframe. The host’s job on `incomplete` is to **unlock** (e.g. re-enable the submit button), not to render per-field errors.
+
 ```ts
 type ConfirmationResult =
   | { status: "succeeded"; intent: "payment"; paymentIntent: /* PaymentIntent */ }
@@ -148,11 +161,13 @@ type ConfirmationResult =
 
 | `status` | Host action |
 |----------|-------------|
-| `succeeded` | Unlock UI; **verify settlement via webhook / server retrieve** (not proof of funds) |
-| `incomplete` | Unlock UI; recoverable — errors shown in iframe; customer can fix and retry |
-| `failed` | Unlock UI; show `errorMessage` |
+| `succeeded` | Run success UX from `onResult`; **verify settlement via webhook / server retrieve** (not proof of funds) |
+| `incomplete` | Unlock UI only — errors already shown under iframe fields; customer can fix and retry |
+| `failed` | Unlock UI; show `errorMessage` on the host page |
 
 `confirm*` returns `void` — wait on `onResult` for UX. Keep a processing state until `onResult` fires (including `incomplete`).
+
+To clear fields and API errors without remounting (e.g. after `succeeded` when starting another payment, or when the customer wants a fresh form), call **`resetForm`** with the same iframe ref/element after `onResult`.
 
 ## Non-express flow (card / bank)
 
@@ -178,7 +193,8 @@ mount form (render token) + onResult
 3. On submit: `await validateForm({ iframeRef })` → if false, stop.
 4. Call **your** backend → `{ token }`.
 5. Immediately `confirmPaymentIntent({ iframeRef, token })` or `confirmSetupIntent(...)`.
-6. Unlock / show errors in `onResult` (including `incomplete`).
+6. Unlock in `onResult` — on `incomplete`, only re-enable the button (field errors are in the iframe); on `failed`, show `errorMessage`; on `succeeded`, run your success UX then verify server-side.
+7. Optional: `resetForm({ iframeRef })` after `onResult` when clearing the form for another attempt (without destroying the mount).
 
 Optional props: `appearance`, `billingAddressRequirement?: "country" | "full"`, card `additionalFields?: { cardholderName: boolean }`.
 
@@ -186,7 +202,7 @@ Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm`, then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm`, then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`. Use `resetForm({ iframe: form.iframe })` to clear fields/errors without remounting.
 
 ## Express flow (Google Pay / Apple Pay)
 
@@ -226,6 +242,7 @@ Mismatch → blank iframe or method not allowed.
 | Wrong confirm helper | Match server endpoint + `confirm*` + `onResult` `intent` |
 | Old success/fail callbacks | Use required `onResult` only |
 | Spinner stuck after field errors | Handle `status: "incomplete"` — unlock UI |
+| Need to clear form after success/retry | `resetForm({ iframeRef })` / `resetForm({ iframe })` — do not remount unless needed |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit path after `validateForm` |
 | GPay/Apple Pay amount types | Client prop: string `"5000"`; Pay API: number `5000` |
@@ -240,7 +257,7 @@ Mismatch → blank iframe or method not allowed.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
 3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs.
 4. Handle `incomplete` / `failed` / `succeeded` in `onResult`; remind about dashboard origins and webhooks.
-5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult`, not the old triple-callback API.
+5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API) and `resetForm` for clearing card/bank forms without remounting.
 
 ## Additional resources
 

@@ -174,6 +174,7 @@ Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos
 | `mountAmosApplePayButton` | Apple Pay |
 | `validateForm({ iframe })` | `Promise<boolean>` (5s timeout → `false`) |
 | `confirmPaymentIntent` / `confirmSetupIntent` | Non-express confirm |
+| `resetForm({ iframe })` | Clear field values + API errors (card/bank); call after `onResult` to retry or start a new payment |
 | `controller.update` / `destroy` | Patch / teardown |
 | `getEmbedOrigin` / `decodeJwt` | Token / env helpers |
 
@@ -189,8 +190,11 @@ Required on every mount: **`onResult(result: ConfirmationResult)`**.
 | `AmosApplePayButton` | Apple Pay |
 | `validateForm({ iframeRef })` | React ref variant |
 | `confirmPaymentIntent` / `confirmSetupIntent` | React ref variants |
+| `resetForm({ iframeRef })` | Clear field values + API errors (card/bank) |
 
-No Provider. Re-exports amos-js helpers/types including `ConfirmationResult`. Schema types: `components` from `@amos.com/node`.
+No Provider. `@amos.com/node` is a **peer dependency** (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmationResult`, `ConfirmationIncompleteReason`. Schema types: `components` from `@amos.com/node`.
+
+All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`.
 
 ### `ConfirmationResult`
 
@@ -201,7 +205,7 @@ No Provider. Re-exports amos-js helpers/types including `ConfirmationResult`. Sc
 | { status: "failed"; errorMessage: string }
 ```
 
-Unlock host UI on any `onResult`. Treat only webhook / server retrieve as settlement proof.
+Unlock host UI on any `onResult`. On `incomplete`, field errors are shown under iframe fields — host unlocks only. On `failed`, show `errorMessage` on the host page. On `succeeded`, drive success UX then verify via webhook / server retrieve (not settlement proof).
 
 ## Appearance
 
