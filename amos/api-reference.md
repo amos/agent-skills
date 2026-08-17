@@ -9,9 +9,11 @@ Companion to [SKILL.md](SKILL.md).
 | | Sandbox | Production |
 |--|---------|------------|
 | Dashboard | `https://dashboard-sandbox.amos.com` | `https://dashboard.amos.com` |
-| Pay API base URL | `https://pay-sandbox.amos.com` | `https://pay.amos.com` |
+| Pay API base URL | `https://api-sandbox.amos.com` | `https://api.amos.com` |
 | Embed | `https://embed-sandbox.amos.com` | `https://embed.amos.com` |
 | `X-Api-Version` | `1` (until the API bumps; SDK major often tracks this) | same |
+
+`@amos.com/node` (`>=0.1.37`): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -56,7 +58,7 @@ POST {baseUrl}/payment_intents
 ```
 
 - `amount` is **integer cents** (JSON number). No per-intent `currency` (account-level).
-- `capture_method`: `"automatic"` | `"automatic_async"` | `"manual"`.
+- `capture_method`: `"automatic"` (sale) | `"automatic_async"` (auth then async capture) | `"manual"` (auth only; capture separately).
 - Optional `recurring_payment` for MIT/recurring (see OpenAPI `RecurringPayment`).
 - **200** → `EmbedToken`:
 
@@ -119,15 +121,15 @@ POST {baseUrl}/customers
 ```ts
 import {
   createPayApiClient,
-  PAY_API_BASE_URL_SANDBOX,
-  PAY_API_VERSION,
+  AMOS_API_BASE_URL_SANDBOX,
+  AMOS_API_VERSION,
 } from "@amos.com/node";
 
 const pay = createPayApiClient({
-  baseUrl: PAY_API_BASE_URL_SANDBOX,
+  baseUrl: AMOS_API_BASE_URL_SANDBOX,
   headers: {
     "X-Api-Key": process.env.AMOS_API_KEY!,
-    "X-Api-Version": PAY_API_VERSION,
+    "X-Api-Version": AMOS_API_VERSION,
   },
 });
 
@@ -180,6 +182,8 @@ Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos
 
 Required on every mount: **`onResult(result: ConfirmationResult)`**.
 
+Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit.
+
 ### `@amos.com/react-amos-js`
 
 | API | Use |
@@ -192,7 +196,7 @@ Required on every mount: **`onResult(result: ConfirmationResult)`**.
 | `confirmPaymentIntent` / `confirmSetupIntent` | React ref variants |
 | `resetForm({ iframeRef })` | Clear field values + API errors (card/bank) |
 
-No Provider. `@amos.com/node` is a **peer dependency** (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmationResult`, `ConfirmationIncompleteReason`. Schema types: `components` from `@amos.com/node`.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.39` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmationResult`, `ConfirmationIncompleteReason`, `PaymentMethodFormValidityChangeEvent`. Schema types: `components` from `@amos.com/node`.
 
 All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`.
 
@@ -207,6 +211,13 @@ All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mount
 
 Unlock host UI on any `onResult`. On `incomplete`, field errors are shown under iframe fields — host unlocks only. On `failed`, show `errorMessage` on the host page. On `succeeded`, drive success UX then verify via webhook / server retrieve (not settlement proof).
 
+### Express button chrome (optional)
+
+Forwarded **into** the iframe (not the iframe element):
+
+- **Google Pay:** `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`, `style` (e.g. `{ height: "48px", width: "100%" }` with `buttonSizeMode: "fill"`).
+- **Apple Pay:** `buttonstyle`, `type`, `locale`, `style` using `--apple-pay-button-height` / `--apple-pay-button-width` (Apple does not size via CSS `height`).
+
 ## Appearance
 
 ```ts
@@ -216,7 +227,9 @@ appearance?: {
 }
 ```
 
-`themeVariables` is **replace**, not merge. Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default `"country"`).
+`themeVariables` is **replace**, not merge. Full `ThemeVariable` list (`--primary`, `--radius`, `--input-height`, `--floating-label-*`, etc.) is in the installed `@amos.com/amos-js` / `react-amos-js` README.
+
+Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default `"country"`): `country` collects country/region and, for CA / PR / GB / US, a postal code; `full` is street address with Smarty autocomplete. Render templates restrict geography via `billing_address_options` (`mode: "us_only"` + `allowed_states`, or `mode: "international"` + `allowed_countries`).
 
 ## Amount typing
 
@@ -227,7 +240,9 @@ appearance?: {
 
 ## Webhooks
 
-Configure in the dashboard. Treat `onResult` as UX; act on webhook delivery or server-side retrieve.
+Configure in the dashboard. Treat `onResult` as UX; act on webhook delivery or server-side retrieve. Relevant events include `payment_intent.succeeded` and `setup_intent.succeeded` (plus cancelled / errored / requires_* variants).
+
+Bank ACH: `PaymentIntent` may include `requires_ach_verification` and `ach_verification` (`plaid_auth` + `link_token`) when the amount is above the ACH verification threshold. That flow belongs to Amos embed confirm — do not collect Plaid credentials or account numbers in merchant DOM.
 
 ## Internal map (Amos eng)
 

@@ -6,8 +6,9 @@ description: >-
   Amos, mounting card/bank/Google Pay/Apple Pay iframes, wiring
   @amos.com/amos-js / @amos.com/react-amos-js / @amos.com/node, creating
   payment intents or setup intents (save a payment method without charging),
-  confirming via embed tokens and onResult, calling pay.amos.com, resetForm,
-  or debugging blank iframes / confirm failures / Signature has expired.
+  confirming via embed tokens and onResult, calling api.amos.com, resetForm,
+  onValidityChange, or debugging blank iframes / confirm failures /
+  Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -21,7 +22,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` (~0.9.7), `@amos.com/react-amos-js` (~0.9.6), `@amos.com/node` (~0.1.x). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Client packages (current majors): `@amos.com/amos-js` (~0.9.11), `@amos.com/react-amos-js` (~0.9.10), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -34,7 +35,7 @@ Merchant browser                              Amos
 Merchant server (any language)
 ─────────────────────────────
 OpenAPI SDK  ─┐
-              ├── X-Api-Key ──►  pay*.amos.com
+              ├── X-Api-Key ──►  api*.amos.com
 raw HTTP     ─┘
   POST /payment_intents | /setup_intents  →  EmbedToken { token, ttl }
 ```
@@ -82,7 +83,7 @@ Same rule for setup and payment intents. Prefetching an intent “to warm up” 
 
 | Credential | Where | Notes |
 |------------|--------|------|
-| **Render token** | Client | Dashboard render template; encodes `env`, origins, methods, amount range |
+| **Render token** | Client | Dashboard render template; encodes `env`, origins, methods, amount range, `billing_address_options` |
 | **API key** | Server only | Never ship to the browser |
 | **Account ID** | Server / approval | Provided after app approval |
 
@@ -91,10 +92,12 @@ Same rule for setup and payment intents. Prefetching an intent “to warm up” 
 | | Sandbox | Production |
 |--|---------|------------|
 | Dashboard | `dashboard-sandbox.amos.com` | `dashboard.amos.com` |
-| Pay API | `https://pay-sandbox.amos.com` | `https://pay.amos.com` |
+| Pay API | `https://api-sandbox.amos.com` | `https://api.amos.com` |
 | Embed | `https://embed-sandbox.amos.com` | `https://embed.amos.com` |
 
-Client SDK picks embed host via `getEmbedOrigin(renderToken)`.
+`@amos.com/node` exports `AMOS_API_BASE_URL_SANDBOX` / `AMOS_API_BASE_URL_PRODUCTION` and `AMOS_API_VERSION`. Do not use the old `PAY_API_*` names or `pay.amos.com` hosts.
+
+Client SDK picks embed host via `getEmbedOrigin(renderToken)`. Render templates also encode billing geography (`billing_address_options`: `us_only` + `allowed_states`, or `international` + `allowed_countries`). Addresses outside that set are rejected.
 
 ## Decision tree
 
@@ -169,10 +172,14 @@ type ConfirmationResult =
 
 To clear fields and API errors without remounting (e.g. after `succeeded` when starting another payment, or when the customer wants a fresh form), call **`resetForm`** with the same iframe ref/element after `onResult`.
 
+## `onValidityChange` (card / bank)
+
+Optional. The iframe posts `{ isValid }` when required fields become valid or invalid (**no PCI data**). Use it to enable/disable the host Pay/Save button. Still call `validateForm` on submit — `onValidityChange` is button UX, not a substitute for the submit gate.
+
 ## Non-express flow (card / bank)
 
 ```
-mount form (render token) + onResult
+mount form (render token) + onResult [+ onValidityChange]
   → user fills iframe
   → validateForm
   → your server creates intent   ← embed token minted here
@@ -190,19 +197,20 @@ mount form (render token) + onResult
 
 1. Render `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` with `renderToken` + **`onResult`**.
 2. Keep `ref` on the component; pass the **same** `iframeRef` to helpers.
-3. On submit: `await validateForm({ iframeRef })` → if false, stop.
-4. Call **your** backend → `{ token }`.
-5. Immediately `confirmPaymentIntent({ iframeRef, token })` or `confirmSetupIntent(...)`.
-6. Unlock in `onResult` — on `incomplete`, only re-enable the button (field errors are in the iframe); on `failed`, show `errorMessage`; on `succeeded`, run your success UX then verify server-side.
-7. Optional: `resetForm({ iframeRef })` after `onResult` when clearing the form for another attempt (without destroying the mount).
+3. Optional: `onValidityChange={({ isValid }) => …}` to enable/disable the submit button.
+4. On submit: `await validateForm({ iframeRef })` → if false, stop.
+5. Call **your** backend → `{ token }`.
+6. Immediately `confirmPaymentIntent({ iframeRef, token })` or `confirmSetupIntent(...)`.
+7. Unlock in `onResult` — on `incomplete`, only re-enable the button (field errors are in the iframe); on `failed`, show `errorMessage`; on `succeeded`, run your success UX then verify server-side.
+8. Optional: `resetForm({ iframeRef })` after `onResult` when clearing the form for another attempt (without destroying the mount).
 
-Optional props: `appearance`, `billingAddressRequirement?: "country" | "full"`, card `additionalFields?: { cardholderName: boolean }`.
+Optional props: `appearance`, `onValidityChange`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`.
 
 Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm`, then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`. Use `resetForm({ iframe: form.iframe })` to clear fields/errors without remounting.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm`, then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`. Pass `onValidityChange` on mount. Use `resetForm({ iframe: form.iframe })` to clear fields/errors without remounting.
 
 ## Express flow (Google Pay / Apple Pay)
 
@@ -214,6 +222,7 @@ mount button → user taps → onInitiatePaymentIntentRequest → your server cr
 - Do **not** call `validateForm` or `confirmPaymentIntent` yourself.
 - Map iframe create attributes onto Pay API bodies (`payment_intent`, `customer`) on the server.
 - Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla). Same options shape.
+- Optional button chrome is forwarded into the iframe: Google Pay (`buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`, `style`); Apple Pay (`buttonstyle`, `type`, `locale`, `style` with `--apple-pay-button-height` / `--apple-pay-button-width` — not CSS `height`).
 - Apple Pay: Safari uses the native sheet; other browsers use Apple's QR popup. SDK shows a host-page waiting overlay with Cancel while the popup is open — do not reinvent expand/collapse iframe hacks.
 
 ## PCI rules (non-negotiable)
@@ -226,7 +235,7 @@ mount button → user taps → onInitiatePaymentIntentRequest → your server cr
 ## Dashboard prerequisites (blank iframe checklist)
 
 1. Add **parent origin(s)** (exact scheme + host).
-2. Create a **render template** with allowed methods.
+2. Create a **render template** with allowed methods (and billing geography).
 3. Issue a **render token**.
 4. Use an **API key** from the same environment.
 
@@ -237,27 +246,30 @@ Mismatch → blank iframe or method not allowed.
 | Symptom / mistake | Fix |
 |-------------------|-----|
 | Blank iframe | Origin/method not on render template; env mismatch |
+| Billing address rejected | Render template `billing_address_options` (`us_only` / `international`) |
 | `validateForm` always false | Iframe not ready; 5s timeout; wrong iframe ref |
 | Confirm no-ops | Pass mounted `iframe` / `iframeRef`, not the container |
 | Wrong confirm helper | Match server endpoint + `confirm*` + `onResult` `intent` |
 | Old success/fail callbacks | Use required `onResult` only |
 | Spinner stuck after field errors | Handle `status: "incomplete"` — unlock UI |
 | Need to clear form after success/retry | `resetForm({ iframeRef })` / `resetForm({ iframe })` — do not remount unless needed |
+| Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit path after `validateForm` |
 | GPay/Apple Pay amount types | Client prop: string `"5000"`; Pay API: number `5000` |
 | Confirming in express flow | Only return token from `onInitiatePaymentIntentRequest` |
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
 | Mixing sandbox key + prod token | Align dashboard, render token, API key, base URL |
+| `PAY_API_*` / `pay.amos.com` | Current `@amos.com/node`: `AMOS_API_*` + `api.amos.com` / `api-sandbox.amos.com` |
 | Trusting only `onResult` / postMessage | Verify via webhook or Pay API retrieve |
 
 ## Agent workflow
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs.
-4. Handle `incomplete` / `failed` / `succeeded` in `onResult`; remind about dashboard origins and webhooks.
-5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API) and `resetForm` for clearing card/bank forms without remounting.
+3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button.
+4. Handle `incomplete` / `failed` / `succeeded` in `onResult`; remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
+5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API), `onValidityChange` for button enablement, and `resetForm` for clearing card/bank forms without remounting.
 
 ## Additional resources
 

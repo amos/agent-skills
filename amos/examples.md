@@ -7,7 +7,7 @@ Companion to [SKILL.md](SKILL.md). Server examples show the **HTTP contract** fi
 ### Payment intent
 
 ```http
-POST https://pay-sandbox.amos.com/payment_intents
+POST https://api-sandbox.amos.com/payment_intents
 X-Api-Key: $AMOS_API_KEY
 X-Api-Version: 1
 Content-Type: application/json
@@ -35,7 +35,7 @@ Merchant route → browser: `{ "token": "<that token>" }` only.
 ### Setup intent (save payment method)
 
 ```http
-POST https://pay-sandbox.amos.com/setup_intents
+POST https://api-sandbox.amos.com/setup_intents
 X-Api-Key: $AMOS_API_KEY
 X-Api-Version: 1
 Content-Type: application/json
@@ -52,7 +52,7 @@ Same `EmbedToken` response; browser confirms with `confirmSetupIntent`.
 ### Customer (optional)
 
 ```http
-POST https://pay-sandbox.amos.com/customers
+POST https://api-sandbox.amos.com/customers
 X-Api-Key: $AMOS_API_KEY
 X-Api-Version: 1
 Content-Type: application/json
@@ -69,16 +69,16 @@ Use returned `id` as `payment_intent.customer_id` / `setup_intent.customer_id`.
 ```ts
 import {
   createPayApiClient,
-  PAY_API_BASE_URL_SANDBOX,
-  PAY_API_VERSION,
+  AMOS_API_BASE_URL_SANDBOX,
+  AMOS_API_VERSION,
 } from "@amos.com/node";
 import type { components } from "@amos.com/node";
 
 const pay = createPayApiClient({
-  baseUrl: PAY_API_BASE_URL_SANDBOX,
+  baseUrl: AMOS_API_BASE_URL_SANDBOX,
   headers: {
     "X-Api-Key": process.env.AMOS_API_KEY!,
-    "X-Api-Version": PAY_API_VERSION,
+    "X-Api-Version": AMOS_API_VERSION,
   },
 });
 
@@ -141,6 +141,7 @@ import type { ConfirmationResult } from "@amos.com/react-amos-js";
 
 export function CardPaymentForm({ renderToken }: { renderToken: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isValid, setIsValid] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -200,6 +201,7 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         ref={iframeRef}
         renderToken={renderToken}
         additionalFields={{ cardholderName: true }}
+        onValidityChange={({ isValid }) => setIsValid(isValid)}
         onResult={handleResult}
       />
       {error ? <p role="alert">{error}</p> : null}
@@ -209,7 +211,7 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
           <button type="button" onClick={onPayAgain}>Pay again</button>
         </p>
       ) : null}
-      <button type="submit" disabled={processing || done}>
+      <button type="submit" disabled={!isValid || processing || done}>
         {processing ? "Processing…" : "Pay now"}
       </button>
     </form>
@@ -311,6 +313,9 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="5000"
         merchantName="Example Store"
+        buttonType="pay"
+        buttonSizeMode="fill"
+        style={{ height: "48px", width: "100%" }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);
@@ -320,6 +325,13 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="5000"
         merchantName="Example Store"
+        buttonstyle="black"
+        type="buy"
+        style={{
+          "--apple-pay-button-height": "48px",
+          "--apple-pay-button-width": "100%",
+          width: "100%",
+        }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);
@@ -346,6 +358,9 @@ import {
 const form = mountAmosCreditCardPaymentMethodForm("#card-form", {
   renderToken: RENDER_TOKEN,
   additionalFields: { cardholderName: true },
+  onValidityChange: ({ isValid }) => {
+    document.querySelector("#pay")!.toggleAttribute("disabled", !isValid);
+  },
   onResult: (result) => {
     if (result.status === "succeeded") {
       console.log(result.paymentIntent.id);
