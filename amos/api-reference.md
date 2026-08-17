@@ -184,6 +184,12 @@ Required on every mount: **`onResult(result: ConfirmationResult)`**.
 
 Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit.
 
+Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) until appearance is ready (1.5s fallback), then fade the iframe in. Skeleton layout follows `appearance.labels`, `additionalFields`, and `billingAddressRequirement`. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` does **not** include the skeleton — only the mount helpers (and React components, which call them) do. Google Pay / Apple Pay still fade in without a skeleton.
+
+Do not set host `opacity` / `height` on the iframe to “fix” loading — that fights the reveal (`pointer-events: none` until shown).
+
+Method tabs: mount every card/bank (and express) form you offer and hide inactive panels with CSS (`hidden`). Do not conditionally unmount on tab change — that reloads the iframe and re-shows the skeleton.
+
 ### `@amos.com/react-amos-js`
 
 | API | Use |
@@ -198,7 +204,7 @@ Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/
 
 No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.39` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmationResult`, `ConfirmationIncompleteReason`, `PaymentMethodFormValidityChangeEvent`. Schema types: `components` from `@amos.com/node`.
 
-All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`.
+All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank/express components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**, not the wrapper.
 
 ### `ConfirmationResult`
 

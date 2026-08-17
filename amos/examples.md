@@ -345,6 +345,37 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
 
 Apple Pay: Safari uses the native sheet; other browsers open Apple's QR popup. The SDK shows a waiting overlay with Cancel — no host expand/collapse code needed.
 
+## React: method tabs (keep mounted)
+
+Mount every method you offer. Hide inactive panels with CSS — do not unmount on tab change (that reloads the iframe and re-shows the skeleton).
+
+```tsx
+const [method, setMethod] = useState<"card" | "bank">("card");
+
+return (
+  <>
+    <button type="button" onClick={() => setMethod("card")}>Card</button>
+    <button type="button" onClick={() => setMethod("bank")}>Bank</button>
+    <div hidden={method !== "card"}>
+      <AmosCreditCardPaymentMethodForm
+        ref={cardRef}
+        renderToken={renderToken}
+        onResult={handleResult}
+      />
+    </div>
+    <div hidden={method !== "bank"}>
+      <AmosBankAccountPaymentMethodForm
+        ref={bankRef}
+        renderToken={renderToken}
+        onResult={handleResult}
+      />
+    </div>
+  </>
+);
+```
+
+Confirm/validate against the selected method’s `iframeRef`.
+
 ## Vanilla: card payment intent
 
 ```ts

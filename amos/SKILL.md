@@ -7,8 +7,8 @@ description: >-
   @amos.com/amos-js / @amos.com/react-amos-js / @amos.com/node, creating
   payment intents or setup intents (save a payment method without charging),
   confirming via embed tokens and onResult, calling api.amos.com, resetForm,
-  onValidityChange, or debugging blank iframes / confirm failures /
-  Signature has expired.
+  onValidityChange, payment method tabs, or debugging blank iframes / confirm
+  failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -22,7 +22,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` (~0.9.11), `@amos.com/react-amos-js` (~0.9.10), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Client packages (current majors): `@amos.com/amos-js` (~0.9.12), `@amos.com/react-amos-js` (~0.9.11), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -193,10 +193,29 @@ mount form (render token) + onResult [+ onValidityChange]
 | Client confirm | `confirmPaymentIntent` | `confirmSetupIntent` |
 | Success in `onResult` | `intent: "payment"` | `intent: "setup"` |
 
+Card/bank **mount helpers and React components** show a field-shaped **loading skeleton** immediately (sized from `appearance`, `additionalFields`, `billingAddressRequirement`) and replace it with the iframe when appearance is ready. Do not invent a host-page placeholder or hide the mount until “ready.” Express buttons (Google Pay / Apple Pay) do not use this skeleton.
+
+### Tabs / multiple methods (keep mounted)
+
+If checkout switches between methods (card, bank, etc.) with tabs or similar UI, **mount every form you offer up front** and hide inactive ones with CSS. Do not mount only the selected tab.
+
+Unmounting on tab change reloads the iframe and re-shows the skeleton. Keeping all mounts in the DOM (visually hidden when inactive) means a tab switch is instant.
+
+```tsx
+{/* ✅ always render; hide inactive panels */}
+<div hidden={method !== "card"}><AmosCreditCardPaymentMethodForm … /></div>
+<div hidden={method !== "bank"}><AmosBankAccountPaymentMethodForm … /></div>
+
+{/* ❌ remounts on every switch */}
+{method === "card" ? <AmosCreditCardPaymentMethodForm … /> : <AmosBankAccountPaymentMethodForm … />}
+```
+
+Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) on the containers. Confirm/validate against the **visible** method’s iframe.
+
 ### React
 
-1. Render `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` with `renderToken` + **`onResult`**.
-2. Keep `ref` on the component; pass the **same** `iframeRef` to helpers.
+1. Render `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` with `renderToken` + **`onResult`**. The component mounts into a wrapper `div`; **`ref` still points at the iframe**.
+2. Keep `ref` on the component; pass the **same** `iframeRef` to helpers (not the wrapper).
 3. Optional: `onValidityChange={({ isValid }) => …}` to enable/disable the submit button.
 4. On submit: `await validateForm({ iframeRef })` → if false, stop.
 5. Call **your** backend → `{ token }`.
@@ -210,7 +229,7 @@ Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm`, then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`. Pass `onValidityChange` on mount. Use `resetForm({ iframe: form.iframe })` to clear fields/errors without remounting.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic), then `validateForm({ iframe: form.iframe })` and `confirm*({ iframe: form.iframe, token })`. Pass `onValidityChange` on mount. Use `resetForm({ iframe: form.iframe })` to clear fields/errors without remounting.
 
 ## Express flow (Google Pay / Apple Pay)
 
@@ -248,7 +267,9 @@ Mismatch → blank iframe or method not allowed.
 | Blank iframe | Origin/method not on render template; env mismatch |
 | Billing address rejected | Render template `billing_address_options` (`us_only` / `international`) |
 | `validateForm` always false | Iframe not ready; 5s timeout; wrong iframe ref |
-| Confirm no-ops | Pass mounted `iframe` / `iframeRef`, not the container |
+| Confirm no-ops | Pass mounted `iframe` / `iframeRef`, not the container / React wrapper `div` |
+| Custom card/bank loading UI | SDK already shows a field skeleton; don’t overlay or hide the mount |
+| Tab switch remounts / flashes skeleton | Keep all method forms mounted; hide inactive tabs with CSS (`hidden`) |
 | Wrong confirm helper | Match server endpoint + `confirm*` + `onResult` `intent` |
 | Old success/fail callbacks | Use required `onResult` only |
 | Spinner stuck after field errors | Handle `status: "incomplete"` — unlock UI |
@@ -267,9 +288,9 @@ Mismatch → blank iframe or method not allowed.
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button.
+3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `incomplete` / `failed` / `succeeded` in `onResult`; remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API), `onValidityChange` for button enablement, and `resetForm` for clearing card/bank forms without remounting.
+5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API), `onValidityChange` for button enablement, `resetForm` for clearing card/bank forms without remounting, and an automatic card/bank loading skeleton on mount.
 
 ## Additional resources
 
