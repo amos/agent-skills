@@ -314,8 +314,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         amount="5000"
         merchantName="Example Store"
         buttonType="pay"
-        buttonSizeMode="fill"
-        style={{ height: "48px", width: "100%" }}
+        fullWidth
+        buttonStyle={{ height: "48px" }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);
@@ -327,11 +327,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         merchantName="Example Store"
         buttonstyle="black"
         type="buy"
-        style={{
-          "--apple-pay-button-height": "48px",
-          "--apple-pay-button-width": "100%",
-          width: "100%",
-        }}
+        fullWidth
+        buttonStyle={{ height: "48px" }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);

@@ -102,7 +102,7 @@ POST {baseUrl}/customers
 }
 ```
 
-**201** → `Customer` (includes `id`). Pass `id` as `customer_id` on the intent when associating.
+**201** → `Customer` (includes `id`). Pass `id` as `customer_id` on the intent when associating. Optional `mailing_address_attributes` (`MailingAddressInput`: line1/2, city, country, postal_code, state, name).
 
 ## Working with any generated SDK
 
@@ -219,10 +219,11 @@ Unlock host UI on any `onResult`. On `incomplete`, field errors are shown under 
 
 ### Express button chrome (optional)
 
-Forwarded **into** the iframe (not the iframe element):
-
-- **Google Pay:** `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`, `style` (e.g. `{ height: "48px", width: "100%" }` with `buttonSizeMode: "fill"`).
-- **Apple Pay:** `buttonstyle`, `type`, `locale`, `style` using `--apple-pay-button-height` / `--apple-pay-button-width` (Apple does not size via CSS `height`).
+- **`fullWidth`** (default `false`) — stretch the button to the mount container. Prefer this over `width: "100%"` / `buttonSizeMode: "fill"`.
+- **Google Pay:** `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`.
+- **Apple Pay:** `buttonstyle`, `type`, `locale`.
+- **React:** `buttonStyle` styles the wallet button **inside** the iframe; `iframeStyle` styles the host `<iframe>`. `style` is a deprecated alias for `buttonStyle`.
+- **Vanilla:** `style` styles the inner button. Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. Apple Pay vanilla height: `--apple-pay-button-height` (React maps CSS `height` on `buttonStyle`).
 
 ## Appearance
 
@@ -233,7 +234,7 @@ appearance?: {
 }
 ```
 
-`themeVariables` is **replace**, not merge. Full `ThemeVariable` list (`--primary`, `--radius`, `--input-height`, `--floating-label-*`, etc.) is in the installed `@amos.com/amos-js` / `react-amos-js` README.
+`themeVariables` is **replace**, not merge. Full `ThemeVariable` list is in the installed SDK README (includes `--floating-label-empty-font-size` and `--floating-label-floated-color` in addition to `--primary`, `--radius`, `--input-height`, `--floating-label-*`).
 
 Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default `"country"`): `country` collects country/region and, for CA / PR / GB / US, a postal code; `full` is street address with Smarty autocomplete. Render templates restrict geography via `billing_address_options` (`mode: "us_only"` + `allowed_states`, or `mode: "international"` + `allowed_countries`).
 

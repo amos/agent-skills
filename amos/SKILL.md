@@ -22,7 +22,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` (~0.9.12), `@amos.com/react-amos-js` (~0.9.11), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Client packages (current majors): `@amos.com/amos-js` (~0.9.14), `@amos.com/react-amos-js` (~0.9.13), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -240,8 +240,10 @@ mount button → user taps → onInitiatePaymentIntentRequest → your server cr
 - Required: `amount` (**string** cents, e.g. `"5000"`), `merchantName`, `onInitiatePaymentIntentRequest`, `onResult`.
 - Do **not** call `validateForm` or `confirmPaymentIntent` yourself.
 - Map iframe create attributes onto Pay API bodies (`payment_intent`, `customer`) on the server.
-- Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla). Same options shape.
-- Optional button chrome is forwarded into the iframe: Google Pay (`buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`, `style`); Apple Pay (`buttonstyle`, `type`, `locale`, `style` with `--apple-pay-button-height` / `--apple-pay-button-width` — not CSS `height`).
+- Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla).
+- Optional chrome: `fullWidth` (default `false`) to fill the mount container — prefer this over `width: "100%"` / `buttonSizeMode: "fill"`. Google Pay also has `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`. Apple Pay has `buttonstyle`, `type`, `locale`.
+- React styles: **`buttonStyle`** (inner wallet button) vs **`iframeStyle`** (host iframe). `style` is a deprecated alias for `buttonStyle`. Example: `fullWidth` + `buttonStyle={{ height: "48px" }}`.
+- Vanilla: `style` still targets the inner button; the wallet iframe is flush with the container (`width: 100%`, no card/bank bleed margin). Apple Pay vanilla height uses `--apple-pay-button-height` (not CSS `height`).
 - Apple Pay: Safari uses the native sheet; other browsers use Apple's QR popup. SDK shows a host-page waiting overlay with Cancel while the popup is open — do not reinvent expand/collapse iframe hacks.
 
 ## PCI rules (non-negotiable)
@@ -278,6 +280,7 @@ Mismatch → blank iframe or method not allowed.
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit path after `validateForm` |
 | GPay/Apple Pay amount types | Client prop: string `"5000"`; Pay API: number `5000` |
+| Wallet button not full-width | Set `fullWidth`; React: `buttonStyle` for inner height, not `style`/`width: "100%"` |
 | Confirming in express flow | Only return token from `onInitiatePaymentIntentRequest` |
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
 | Mixing sandbox key + prod token | Align dashboard, render token, API key, base URL |
