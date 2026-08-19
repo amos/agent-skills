@@ -249,10 +249,13 @@ Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default 
 
 ## Amount typing
 
-| Surface | Type | Example |
+| Surface | Type | Example ($50.00) |
 |---------|------|---------|
-| Pay API `payment_intent.amount` | number | `5000` |
-| Google Pay / Apple Pay `amount` prop | string | `"5000"` |
+| Pay API `payment_intent.amount` (card/bank create) | number, integer cents | `5000` |
+| Google Pay / Apple Pay `amount` prop (wallet sheet) | string, major-currency decimal | `"50.00"` |
+| Wallet `paymentIntentCreateAttributes.amount` | number, integer cents (iframe converts the button prop) | `5000` |
+
+Do not pass `"5000"` as the wallet button `amount` — Google Pay `totalPrice` and Apple Pay `total.amount` are major units, so that would display and charge $5,000.00.
 
 ## Webhooks
 

@@ -6,6 +6,8 @@ Companion to [SKILL.md](SKILL.md). Server examples show the **HTTP contract** fi
 
 ### Payment intent
 
+`amount` is integer cents (`5000` = $50.00).
+
 ```http
 POST https://api-sandbox.amos.com/payment_intents
 X-Api-Key: $AMOS_API_KEY
@@ -83,6 +85,7 @@ const pay = createPayApiClient({
 });
 
 export async function createPaymentIntent(input: {
+  /** Integer cents (e.g. `5000` for $50.00). */
   amount: number;
   customerId?: string;
   email?: string;
@@ -182,7 +185,7 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
       const res = await fetch("/api/payment-intents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 5000, email: "customer@example.com" }),
+        body: JSON.stringify({ amount: 5000, email: "customer@example.com" }), // $50.00 in cents
       });
       if (!res.ok) throw new Error("Could not start payment.");
 
@@ -280,6 +283,8 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 
 ## React: Google Pay / Apple Pay (express)
 
+Wallet button `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), not cents. The iframe converts it to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to your Pay API create call as-is.
+
 ```tsx
 import { useState } from "react";
 import { AmosGooglePayButton, AmosApplePayButton } from "@amos.com/react-amos-js";
@@ -311,7 +316,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
     <>
       <AmosGooglePayButton
         renderToken={renderToken}
-        amount="5000"
+        amount="50.00"
         merchantName="Example Store"
         buttonProps={{ buttonType: "pay" }}
         iframeProps={{ style: { borderRadius: "8px" } }}
@@ -322,7 +327,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
       />
       <AmosApplePayButton
         renderToken={renderToken}
-        amount="5000"
+        amount="50.00"
         merchantName="Example Store"
         buttonProps={{ buttonstyle: "black", type: "buy" }}
         iframeProps={{ style: { borderRadius: "8px" } }}

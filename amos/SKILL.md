@@ -237,7 +237,7 @@ Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentM
 mount button → user taps → onInitiatePaymentIntentRequest → your server creates PI → return token → SDK auto-confirms → onResult
 ```
 
-- Required: `amount` (**string** cents, e.g. `"5000"`), `merchantName`, `onInitiatePaymentIntentRequest`, `onResult`.
+- Required: `amount` (**string** major-currency decimal, e.g. `"50.00"` for $50.00), `merchantName`, `onInitiatePaymentIntentRequest`, `onResult`. The iframe converts that string to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to `POST /payment_intents` as-is.
 - Do **not** call `validateForm` or `confirmPaymentIntent` yourself.
 - Map iframe create attributes onto Pay API bodies (`payment_intent`, `customer`) on the server.
 - Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla).
@@ -281,7 +281,7 @@ Mismatch → blank iframe or method not allowed.
 | Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit path after `validateForm` |
-| GPay/Apple Pay amount types | Client prop: string `"5000"`; Pay API: number `5000` |
+| GPay/Apple Pay amount types | Client prop: major-currency string `"50.00"`; Pay API / `paymentIntentCreateAttributes.amount`: number `5000` (cents). Passing `"5000"` to the button charges $5,000. |
 | `fullWidth` / top-level `buttonType` / `buttonStyle` | Breaking: use `height` + `buttonProps` + React `iframeProps` (vanilla `iframeStyle`) |
 | Confirming in express flow | Only return token from `onInitiatePaymentIntentRequest` |
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
