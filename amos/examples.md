@@ -313,9 +313,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="5000"
         merchantName="Example Store"
-        buttonType="pay"
-        fullWidth
-        buttonStyle={{ height: "48px" }}
+        buttonProps={{ buttonType: "pay" }}
+        iframeProps={{ style: { borderRadius: "8px" } }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);
@@ -325,10 +324,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="5000"
         merchantName="Example Store"
-        buttonstyle="black"
-        type="buy"
-        fullWidth
-        buttonStyle={{ height: "48px" }}
+        buttonProps={{ buttonstyle: "black", type: "buy" }}
+        iframeProps={{ style: { borderRadius: "8px" } }}
         onInitiatePaymentIntentRequest={initiate}
         onResult={(result) => {
           if (result.status === "failed") setError(result.errorMessage);

@@ -7,8 +7,8 @@ description: >-
   @amos.com/amos-js / @amos.com/react-amos-js / @amos.com/node, creating
   payment intents or setup intents (save a payment method without charging),
   confirming via embed tokens and onResult, calling api.amos.com, resetForm,
-  onValidityChange, payment method tabs, or debugging blank iframes / confirm
-  failures / Signature has expired.
+  onValidityChange, payment method tabs, wallet buttonProps / iframeProps, or
+  debugging blank iframes / confirm failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -22,7 +22,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` (~0.9.14), `@amos.com/react-amos-js` (~0.9.13), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Client packages (current majors): `@amos.com/amos-js` (~0.9.15), `@amos.com/react-amos-js` (~0.9.14), `@amos.com/node` (~0.1.x, peer `>=0.1.39`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -223,7 +223,7 @@ Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) o
 7. Unlock in `onResult` — on `incomplete`, only re-enable the button (field errors are in the iframe); on `failed`, show `errorMessage`; on `succeeded`, run your success UX then verify server-side.
 8. Optional: `resetForm({ iframeRef })` after `onResult` when clearing the form for another attempt (without destroying the mount).
 
-Optional props: `appearance`, `onValidityChange`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`.
+Optional props: `appearance` (**card/bank only**), `onValidityChange`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`.
 
 Do **not** create the intent in `useEffect` on mount/open.
 
@@ -241,9 +241,11 @@ mount button → user taps → onInitiatePaymentIntentRequest → your server cr
 - Do **not** call `validateForm` or `confirmPaymentIntent` yourself.
 - Map iframe create attributes onto Pay API bodies (`payment_intent`, `customer`) on the server.
 - Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla).
-- Optional chrome: `fullWidth` (default `false`) to fill the mount container — prefer this over `width: "100%"` / `buttonSizeMode: "fill"`. Google Pay also has `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`. Apple Pay has `buttonstyle`, `type`, `locale`.
-- React styles: **`buttonStyle`** (inner wallet button) vs **`iframeStyle`** (host iframe). `style` is a deprecated alias for `buttonStyle`. Example: `fullWidth` + `buttonStyle={{ height: "48px" }}`.
-- Vanilla: `style` still targets the inner button; the wallet iframe is flush with the container (`width: 100%`, no card/bank bleed margin). Apple Pay vanilla height uses `--apple-pay-button-height` (not CSS `height`).
+- Wallet buttons do **not** take `appearance`.
+- **Layout:** the branded button fills the iframe. `height` is a CSS length (default `"48px"`). Size the **mount slot** (container width), not the button. Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "240px" } }`.
+- **`buttonProps`:** native button options. Google Pay omitted fields keep `buttonType: "plain"` and `buttonSizeMode: "fill"` (`buttonColor`, `buttonBorderType`, `buttonLocale`, `style`, …). Apple Pay omitted fields keep `buttonstyle: "black"`, `type: "plain"`, `locale: "en-US"` (`style.width` also sets `--apple-pay-button-width` unless you set that custom property).
+- **Host iframe:** React `iframeProps` (`style`, `className`, `id`). Vanilla `iframeClassName` / `iframeStyle`. Use CSS values with units (`{ borderRadius: "8px" }`).
+- **Removed (do not use):** `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`. Those belong in `buttonProps` (and `height` for painted height).
 - Apple Pay: Safari uses the native sheet; other browsers use Apple's QR popup. SDK shows a host-page waiting overlay with Cancel while the popup is open — do not reinvent expand/collapse iframe hacks.
 
 ## PCI rules (non-negotiable)
@@ -280,7 +282,7 @@ Mismatch → blank iframe or method not allowed.
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit path after `validateForm` |
 | GPay/Apple Pay amount types | Client prop: string `"5000"`; Pay API: number `5000` |
-| Wallet button not full-width | Set `fullWidth`; React: `buttonStyle` for inner height, not `style`/`width: "100%"` |
+| `fullWidth` / top-level `buttonType` / `buttonStyle` | Breaking: use `height` + `buttonProps` + React `iframeProps` (vanilla `iframeStyle`) |
 | Confirming in express flow | Only return token from `onInitiatePaymentIntentRequest` |
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
 | Mixing sandbox key + prod token | Align dashboard, render token, API key, base URL |
@@ -293,7 +295,7 @@ Mismatch → blank iframe or method not allowed.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
 3. Scaffold client form/button with **`onResult`**; wire **validate → create → confirm** on submit (or express create-on-tap). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `incomplete` / `failed` / `succeeded` in `onResult`; remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar — 0.9.x client SDKs use `onResult` (not the old triple-callback API), `onValidityChange` for button enablement, `resetForm` for clearing card/bank forms without remounting, and an automatic card/bank loading skeleton on mount.
+5. Read installed package versions if APIs look unfamiliar — 0.9.15+ client SDKs use `onResult`, `onValidityChange`, `resetForm`, a card/bank loading skeleton, and wallet `height` / `buttonProps` / `iframeProps` (not `fullWidth` or top-level `buttonType` / `buttonStyle`).
 
 ## Additional resources
 

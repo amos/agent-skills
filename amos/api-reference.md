@@ -204,7 +204,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 
 No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.39` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmationResult`, `ConfirmationIncompleteReason`, `PaymentMethodFormValidityChangeEvent`. Schema types: `components` from `@amos.com/node`.
 
-All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank/express components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**, not the wrapper.
+All messaging helpers (`validateForm`, `confirm*`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
 ### `ConfirmationResult`
 
@@ -219,11 +219,20 @@ Unlock host UI on any `onResult`. On `incomplete`, field errors are shown under 
 
 ### Express button chrome (optional)
 
-- **`fullWidth`** (default `false`) — stretch the button to the mount container. Prefer this over `width: "100%"` / `buttonSizeMode: "fill"`.
-- **Google Pay:** `buttonType`, `buttonColor`, `buttonRadius`, `buttonSizeMode`, `buttonLocale`, `buttonBorderType`.
-- **Apple Pay:** `buttonstyle`, `type`, `locale`.
-- **React:** `buttonStyle` styles the wallet button **inside** the iframe; `iframeStyle` styles the host `<iframe>`. `style` is a deprecated alias for `buttonStyle`.
-- **Vanilla:** `style` styles the inner button. Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. Apple Pay vanilla height: `--apple-pay-button-height` (React maps CSS `height` on `buttonStyle`).
+Wallet buttons do **not** take `appearance`. The branded button fills the iframe; size the **mount slot**.
+
+| Prop | Where | Notes |
+|------|--------|------|
+| `height` | Top-level | CSS length, default `"48px"`. Apple ignores CSS `height`; Amos maps it. |
+| `buttonProps` | Top-level object | Native GPay `ButtonOptions` / `<apple-pay-button>` attrs + inner `style`. Omitted GPay fields: `plain` / `fill`. Omitted Apple fields: `black` / `plain` / `en-US`. |
+| `iframeProps` | React | Host `<iframe>` (`style`, `className`, `id`). CSS lengths need units. |
+| `iframeClassName` / `iframeStyle` | Vanilla | Same host-iframe chrome. |
+
+Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "240px" } }`.
+
+**Removed:** `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`.
+
+Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed.
 
 ## Appearance
 
@@ -234,7 +243,7 @@ appearance?: {
 }
 ```
 
-`themeVariables` is **replace**, not merge. Full `ThemeVariable` list is in the installed SDK README (includes `--floating-label-empty-font-size` and `--floating-label-floated-color` in addition to `--primary`, `--radius`, `--input-height`, `--floating-label-*`).
+`themeVariables` is **replace**, not merge. **Card/bank only** — wallet buttons do not take `appearance`. Full `ThemeVariable` list is in the installed SDK README.
 
 Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default `"country"`): `country` collects country/region and, for CA / PR / GB / US, a postal code; `full` is street address with Smarty autocomplete. Render templates restrict geography via `billing_address_options` (`mode: "us_only"` + `allowed_states`, or `mode: "international"` + `allowed_countries`).
 
