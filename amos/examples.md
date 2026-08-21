@@ -281,6 +281,62 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 }
 ```
 
+## React: bank payment intent (Plaid / ACH)
+
+Bank `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), same as wallets. Omit it for setup intents or when the charge is unknown — if a threshold is set, the SDK shows **Connect bank account** (Plaid Link) instead of routing/account fields.
+
+Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
+
+```tsx
+import { useRef, useState } from "react";
+import {
+  AmosBankAccountPaymentMethodForm,
+  confirmPaymentIntent,
+  validateForm,
+} from "@amos.com/react-amos-js";
+import type { ConfirmationResult } from "@amos.com/react-amos-js";
+
+export function BankPaymentForm({ renderToken }: { renderToken: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isValid, setIsValid] = useState(false);
+  const [processing, setProcessing] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setProcessing(true);
+    try {
+      if (!(await validateForm({ iframeRef }))) {
+        setProcessing(false);
+        return;
+      }
+      const res = await fetch("/api/payment-intents", { method: "POST" });
+      const { token } = (await res.json()) as { token: string };
+      confirmPaymentIntent({ iframeRef, token });
+    } catch {
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <AmosBankAccountPaymentMethodForm
+        ref={iframeRef}
+        renderToken={renderToken}
+        amount="50.00"
+        onValidityChange={({ isValid }) => setIsValid(isValid)}
+        onResult={(result: ConfirmationResult) => {
+          setProcessing(false);
+          if (result.status === "failed") console.error(result.errorMessage);
+        }}
+      />
+      <button type="submit" disabled={!isValid || processing}>
+        {processing ? "Processing…" : "Pay with bank"}
+      </button>
+    </form>
+  );
+}
+```
+
 ## React: Google Pay / Apple Pay (express)
 
 Wallet button `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), not cents. The iframe converts it to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to your Pay API create call as-is.
@@ -407,6 +463,25 @@ document.querySelector("#pay")!.addEventListener("click", async () => {
   );
   confirmPaymentIntent({ iframe: form.iframe, token });
 });
+```
+
+## Vanilla: bank (Plaid / ACH)
+
+```ts
+import { mountAmosBankAccountPaymentMethodForm } from "@amos.com/amos-js";
+
+const bank = mountAmosBankAccountPaymentMethodForm("#bank-form", {
+  renderToken: RENDER_TOKEN,
+  amount: "50.00", // omit to always Connect once a threshold exists
+  onValidityChange: ({ isValid }) => {
+    document.querySelector("#pay")!.toggleAttribute("disabled", !isValid);
+  },
+  onResult: (result) => {
+    /* same as card */
+  },
+});
+
+bank.update({ amount: "25.00" });
 ```
 
 ## Appearance
