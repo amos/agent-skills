@@ -49,7 +49,7 @@ Content-Type: application/json
 }
 ```
 
-Same `EmbedToken` response; browser confirms with `confirmSetupIntent`.
+Same `EmbedToken` response; browser confirms with `await confirmSetup`.
 
 ### Customer (optional)
 
@@ -136,11 +136,11 @@ export async function createSetupIntent(input: { customerId?: string }) {
 import { useRef, useState } from "react";
 import {
   AmosCreditCardPaymentMethodForm,
-  confirmPaymentIntent,
+  confirmPayment,
   resetForm,
   validateForm,
 } from "@amos.com/react-amos-js";
-import type { ConfirmationResult } from "@amos.com/react-amos-js";
+import type { ConfirmResult } from "@amos.com/react-amos-js";
 
 export function CardPaymentForm({ renderToken }: { renderToken: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -148,20 +148,6 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-
-  function handleResult(result: ConfirmationResult) {
-    setProcessing(false);
-    if (result.status === "succeeded") {
-      setDone(true);
-      return;
-    }
-    if (result.status === "failed") {
-      setError(result.errorMessage);
-      return;
-    }
-    // incomplete: field_errors | validation_failed — shown in iframe; unlock UI
-    setError(null);
-  }
 
   function onPayAgain() {
     setDone(false);
@@ -190,10 +176,16 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
       if (!res.ok) throw new Error("Could not start payment.");
 
       const { token } = (await res.json()) as { token: string };
-      confirmPaymentIntent({ iframeRef, token });
-      // Keep processing until onResult
+      const result: ConfirmResult = await confirmPayment({ iframeRef, token });
+      if (result.status === "succeeded") {
+        setDone(true);
+        return;
+      }
+      // failed: field errors stay in the iframe; unlock UI
+      setError("Payment failed. Please try again.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
       setProcessing(false);
     }
   }
@@ -205,7 +197,9 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         additionalFields={{ cardholderName: true }}
         onValidityChange={({ isValid }) => setIsValid(isValid)}
-        onResult={handleResult}
+        onCardBrandChanged={({ brand }) => {
+          // "visa" | "mastercard" | "amex" | "discover" | "diners" | "jcb" | null
+        }}
       />
       {error ? <p role="alert">{error}</p> : null}
       {done ? (
@@ -224,13 +218,13 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
 
 ## React: setup intent (save card)
 
-Same form; different server route + confirm helper. `onResult` with `intent: "setup"` on success.
+Same form; different server route + `confirmSetup`.
 
 ```tsx
 import { useRef, useState } from "react";
 import {
   AmosCreditCardPaymentMethodForm,
-  confirmSetupIntent,
+  confirmSetup,
   validateForm,
 } from "@amos.com/react-amos-js";
 
@@ -255,9 +249,13 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
       if (!res.ok) throw new Error("Could not start setup.");
 
       const { token } = (await res.json()) as { token: string };
-      confirmSetupIntent({ iframeRef, token });
+      const result = await confirmSetup({ iframeRef, token });
+      if (result.status !== "succeeded") {
+        setError("Failed to save the payment method.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
       setProcessing(false);
     }
   }
@@ -267,10 +265,6 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
       <AmosCreditCardPaymentMethodForm
         ref={iframeRef}
         renderToken={renderToken}
-        onResult={(result) => {
-          setProcessing(false);
-          if (result.status === "failed") setError(result.errorMessage);
-        }}
       />
       {error ? <p role="alert">{error}</p> : null}
       <button type="submit" disabled={processing}>
@@ -283,7 +277,7 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 
 ## React: bank payment intent (Plaid / ACH)
 
-Bank `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), same as wallets. Omit it for setup intents or when the charge is unknown — if a threshold is set, the SDK shows **Connect bank account** (Plaid Link) instead of routing/account fields.
+Bank `amount` is a **required** major-currency decimal string (`"50.00"` for $50.00), same as wallets, and **defaults to `"0"`**. On open-amount forms that start at 0, the SDK keeps the routing/account fields — 0 is typically under the ACH threshold, so **Connect bank account** (Plaid Link) stays hidden until the customer enters a qualifying charge. For setup (save bank), pass `intent="setup"` — that always shows Connect (no merchant lookup) unless the render token disables verification.
 
 Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
 
@@ -291,10 +285,9 @@ Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and
 import { useRef, useState } from "react";
 import {
   AmosBankAccountPaymentMethodForm,
-  confirmPaymentIntent,
+  confirmPayment,
   validateForm,
 } from "@amos.com/react-amos-js";
-import type { ConfirmationResult } from "@amos.com/react-amos-js";
 
 export function BankPaymentForm({ renderToken }: { renderToken: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -311,8 +304,8 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
       }
       const res = await fetch("/api/payment-intents", { method: "POST" });
       const { token } = (await res.json()) as { token: string };
-      confirmPaymentIntent({ iframeRef, token });
-    } catch {
+      await confirmPayment({ iframeRef, token });
+    } finally {
       setProcessing(false);
     }
   }
@@ -323,11 +316,8 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
         ref={iframeRef}
         renderToken={renderToken}
         amount="50.00"
+        // intent="setup" // save a bank account — always Connect unless verification is disabled
         onValidityChange={({ isValid }) => setIsValid(isValid)}
-        onResult={(result: ConfirmationResult) => {
-          setProcessing(false);
-          if (result.status === "failed") console.error(result.errorMessage);
-        }}
       />
       <button type="submit" disabled={!isValid || processing}>
         {processing ? "Processing…" : "Pay with bank"}
@@ -341,32 +331,48 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
 
 Wallet button `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), not cents. The iframe converts it to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to your Pay API create call as-is.
 
+Create the intent inside **`onConfirm`**, then **`return confirmPayment(token)`**. The SDK does not auto-confirm.
+
 ```tsx
 import { useState } from "react";
-import { AmosGooglePayButton, AmosApplePayButton } from "@amos.com/react-amos-js";
+import {
+  AmosGooglePayButton,
+  AmosApplePayButton,
+  type ConfirmResult,
+} from "@amos.com/react-amos-js";
+import type { components } from "@amos.com/node";
 
 export function ExpressButtons({ renderToken }: { renderToken: string }) {
   const [error, setError] = useState<string | null>(null);
 
-  const initiate = async ({
+  async function handleConfirm({
     paymentIntentCreateAttributes,
     customerCreateAttributes,
+    confirmPayment,
   }: {
-    paymentIntentCreateAttributes: unknown;
-    customerCreateAttributes: unknown;
-  }) => {
-    const res = await fetch("/api/payment-intents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        paymentIntent: paymentIntentCreateAttributes,
-        customer: customerCreateAttributes,
-      }),
-    });
-    if (!res.ok) throw new Error("Failed to create payment intent.");
-    const { token } = (await res.json()) as { token: string };
-    return token;
-  };
+    paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
+    customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
+    confirmPayment: (token: string) => Promise<ConfirmResult>;
+  }): Promise<ConfirmResult> {
+    try {
+      const res = await fetch("/api/payment-intents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentIntent: paymentIntentCreateAttributes,
+          customer: customerCreateAttributes,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create payment intent.");
+      const { token } = (await res.json()) as { token: string };
+      const result = await confirmPayment(token);
+      if (result.status === "failed") setError("Payment failed. Please try again.");
+      return result;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+      return { status: "failed" };
+    }
+  }
 
   return (
     <>
@@ -376,10 +382,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         merchantName="Example Store"
         buttonProps={{ buttonType: "pay" }}
         iframeProps={{ style: { borderRadius: "8px" } }}
-        onInitiatePaymentIntentRequest={initiate}
-        onResult={(result) => {
-          if (result.status === "failed") setError(result.errorMessage);
-        }}
+        onConfirm={handleConfirm}
       />
       <AmosApplePayButton
         renderToken={renderToken}
@@ -387,10 +390,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         merchantName="Example Store"
         buttonProps={{ buttonstyle: "black", type: "buy" }}
         iframeProps={{ style: { borderRadius: "8px" } }}
-        onInitiatePaymentIntentRequest={initiate}
-        onResult={(result) => {
-          if (result.status === "failed") setError(result.errorMessage);
-        }}
+        onConfirm={handleConfirm}
       />
       {error ? <p role="alert">{error}</p> : null}
     </>
@@ -415,14 +415,13 @@ return (
       <AmosCreditCardPaymentMethodForm
         ref={cardRef}
         renderToken={renderToken}
-        onResult={handleResult}
       />
     </div>
     <div hidden={method !== "bank"}>
       <AmosBankAccountPaymentMethodForm
         ref={bankRef}
         renderToken={renderToken}
-        onResult={handleResult}
+        amount="0"
       />
     </div>
   </>
@@ -437,7 +436,7 @@ Confirm/validate against the selected method’s `iframeRef`.
 import {
   mountAmosCreditCardPaymentMethodForm,
   validateForm,
-  confirmPaymentIntent,
+  confirmPayment,
   resetForm,
 } from "@amos.com/amos-js";
 
@@ -447,12 +446,8 @@ const form = mountAmosCreditCardPaymentMethodForm("#card-form", {
   onValidityChange: ({ isValid }) => {
     document.querySelector("#pay")!.toggleAttribute("disabled", !isValid);
   },
-  onResult: (result) => {
-    if (result.status === "succeeded") {
-      console.log(result.paymentIntent.id);
-      // Optional: resetForm({ iframe: form.iframe }) before another payment
-    } else if (result.status === "failed") console.error(result.errorMessage);
-    else if (result.status === "incomplete") console.log(result.reason);
+  onCardBrandChanged: ({ brand }) => {
+    // "visa" | "mastercard" | "amex" | "discover" | "diners" | "jcb" | null
   },
 });
 
@@ -461,8 +456,51 @@ document.querySelector("#pay")!.addEventListener("click", async () => {
   const { token } = await fetch("/api/payment-intents", { method: "POST" }).then(
     (r) => r.json(),
   );
-  confirmPaymentIntent({ iframe: form.iframe, token });
+  const result = await confirmPayment({ iframe: form.iframe, token });
+  if (result.status === "succeeded") {
+    // Optional: resetForm({ iframe: form.iframe }) before another payment
+  }
 });
+```
+
+## Vanilla: Google Pay / Apple Pay
+
+```ts
+import {
+  mountAmosApplePayButton,
+  mountAmosGooglePayButton,
+  type ConfirmResult,
+} from "@amos.com/amos-js";
+import type { components } from "@amos.com/node";
+
+const shared = {
+  renderToken: RENDER_TOKEN,
+  amount: "50.00",
+  merchantName: "Example Store",
+  onConfirm: async ({
+    paymentIntentCreateAttributes,
+    customerCreateAttributes,
+    confirmPayment,
+  }: {
+    paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
+    customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
+    confirmPayment: (token: string) => Promise<ConfirmResult>;
+  }): Promise<ConfirmResult> => {
+    const response = await fetch("/api/payment-intents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer: customerCreateAttributes,
+        paymentIntent: paymentIntentCreateAttributes,
+      }),
+    });
+    const { token } = (await response.json()) as { token: string };
+    return confirmPayment(token);
+  },
+};
+
+mountAmosGooglePayButton("#google-pay", shared);
+mountAmosApplePayButton("#apple-pay", shared);
 ```
 
 ## Vanilla: bank (Plaid / ACH)
@@ -472,12 +510,10 @@ import { mountAmosBankAccountPaymentMethodForm } from "@amos.com/amos-js";
 
 const bank = mountAmosBankAccountPaymentMethodForm("#bank-form", {
   renderToken: RENDER_TOKEN,
-  amount: "50.00", // omit to always Connect once a threshold exists
+  amount: "50.00", // defaults to "0" (manual form until the charge meets the threshold)
+  // intent: "setup", // save a bank account — always Connect unless verification is disabled
   onValidityChange: ({ isValid }) => {
     document.querySelector("#pay")!.toggleAttribute("disabled", !isValid);
-  },
-  onResult: (result) => {
-    /* same as card */
   },
 });
 
