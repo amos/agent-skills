@@ -188,20 +188,18 @@ Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos
 | `mountAmosGooglePayButton` | GPay |
 | `mountAmosApplePayButton` | Apple Pay |
 | `validateForm({ iframe })` | `Promise<boolean>` (5s timeout → `false`; Plaid mode resolves immediately from Connect state) |
-| `confirmPayment` / `confirmSetup` | Non-express confirm — **`Promise<ConfirmResult>`** (60s timeout → `failed`). Deprecated aliases: `confirmPaymentIntent` / `confirmSetupIntent` |
+| `confirmPayment` / `confirmSetup` | Non-express confirm — **`Promise<ConfirmResult>`** (60s timeout → `failed`) |
 | `resetForm({ iframe })` | Clear field values + API errors (card/bank); also disconnects Plaid. Call after confirm to retry or start a new payment |
 | `controller.update` / `destroy` | Patch / teardown |
 | `getEmbedOrigin` / `decodeJwt` | Token / env helpers |
 
-Required on every mount: **`renderToken`**. Card/bank do **not** require `onResult`.
+Required on every mount: **`renderToken`**.
 
 Wallet mounts require **`onConfirm({ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }) => Promise<ConfirmResult>`**. Create the intent, then `return confirmPayment(token)`. Do not use `onInitiatePaymentIntentRequest`.
 
 Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit. On bank, `isValid` is also true after Plaid Link returns credentials.
 
 Optional on **card only**: **`onCardBrandChanged({ brand })`** — PCI-safe (`CardBrand | null`). `brand` is `"visa"` | `"mastercard"` | `"amex"` | `"discover"` | `"diners"` | `"jcb"`, or `null` when empty / unknown. Does not include PAN, last4, or BIN. Never fired for bank.
-
-Optional deprecated **`onResult(ConfirmationResult)`** — still fires (`incomplete` with `reason`, `failed` with `errorMessage`, `succeeded` with intent objects). New hosts should await `confirmPayment` / `confirmSetup`.
 
 Bank form **`amount`** (major-currency decimal, e.g. `"50.00"`, **required**, defaults to `"0"`) and **`intent?: "payment" | "setup"`** (default `"payment"`). Payment compares `amount` to the ACH threshold the iframe fetches. `"setup"` always requires Connect / Plaid (no `GET /merchants`), unless the render token disables verification (`allowed_payment_methods` bank `options.verification: false`; omitted means enabled). When verification is required, the SDK hides the routing/account iframe and renders a parent-page **Connect bank account** button, then opens Plaid Link. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `plaid: { public_token, account_id }` (`PlaidCredentialsInput`) and omits `bank_account_profile_attributes`. Hosts must **not** call `GET /merchants` or `POST /plaid_link_tokens`. **CSP:** `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Changing `intent` remounts the bank iframe.
 
@@ -225,7 +223,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 | `confirmPayment` / `confirmSetup` | React ref variants — `Promise<ConfirmResult>` |
 | `resetForm({ iframeRef })` | Clear field values + API errors (card/bank); also disconnects Plaid |
 
-No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.53` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmResult`, `ConfirmationResult` (deprecated), `ConfirmationIncompleteReason`, `PaymentMethodFormValidityChangeEvent`, `CardBrand`, `PaymentMethodFormCardBrandChangeEvent`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`amount`** (defaults to `"0"`) and **`intent`** (`"payment"` | `"setup"`). Card form accepts optional `onCardBrandChanged`. Wallet buttons show a button-shaped skeleton on first render.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.53` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `ConfirmResult`, `PaymentMethodFormValidityChangeEvent`, `CardBrand`, `PaymentMethodFormCardBrandChangeEvent`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`amount`** (defaults to `"0"`) and **`intent`** (`"payment"` | `"setup"`). Card form accepts optional `onCardBrandChanged`. Wallet buttons show a button-shaped skeleton on first render.
 
 All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
@@ -235,7 +233,7 @@ All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetF
 type ConfirmResult = { status: "succeeded" } | { status: "failed" };
 ```
 
-Await `confirmPayment` / `confirmSetup`. On `failed`, field errors are shown under iframe fields — host unlocks. On `succeeded`, drive success UX then verify via webhook / server retrieve (authorization, not settlement proof; `automatic_async` capture may still run). Deprecated `ConfirmationResult` (via `onResult`) still distinguishes `incomplete` / includes intent objects / `errorMessage`.
+Await `confirmPayment` / `confirmSetup`. On `failed`, field errors are shown under iframe fields — host unlocks. On `succeeded`, drive success UX then verify via webhook / server retrieve (authorization, not settlement proof; `automatic_async` capture may still run). No intent object, `errorMessage`, or `incomplete` on this type.
 
 ### Express button chrome (optional)
 
@@ -251,7 +249,7 @@ Wallet buttons do **not** take `appearance`. The branded button fills the iframe
 
 Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "240px" } }`.
 
-**Removed:** `onInitiatePaymentIntentRequest`, `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`.
+**Removed:** `onResult`, `ConfirmationResult`, `confirmPaymentIntent` / `confirmSetupIntent`, `onInitiatePaymentIntentRequest`, `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`.
 
 Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. A button-shaped skeleton is shown immediately at `height` and replaced when appearance is ready.
 
