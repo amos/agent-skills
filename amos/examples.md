@@ -136,11 +136,12 @@ export async function createSetupIntent(input: { customerId?: string }) {
 import { useRef, useState } from "react";
 import {
   AmosCreditCardPaymentMethodForm,
+  type ConfirmPaymentResult,
   confirmPayment,
+  focusField,
   resetForm,
   validateForm,
 } from "@amos.com/react-amos-js";
-import type { ConfirmResult } from "@amos.com/react-amos-js";
 
 export function CardPaymentForm({ renderToken }: { renderToken: string }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -176,7 +177,7 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
       if (!res.ok) throw new Error("Could not start payment.");
 
       const { token } = (await res.json()) as { token: string };
-      const result: ConfirmResult = await confirmPayment({ iframeRef, token });
+      const result: ConfirmPaymentResult = await confirmPayment({ iframeRef, token });
       if (result.status === "succeeded") {
         setDone(true);
         return;
@@ -196,11 +197,18 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         ref={iframeRef}
         renderToken={renderToken}
         additionalFields={{ cardholderName: true }}
+        defaultValues={{
+          name: "Alex Example",
+          billingAddress: { country: "US", postalCode: "90210" },
+        }}
         onValidityChange={({ isValid }) => setIsValid(isValid)}
         onCardBrandChanged={({ brand }) => {
           // "visa" | "mastercard" | "amex" | "discover" | "diners" | "jcb" | null
         }}
       />
+      <button type="button" onClick={() => focusField({ iframeRef, field: "cardNumber" })}>
+        Edit card
+      </button>
       {error ? <p role="alert">{error}</p> : null}
       {done ? (
         <p>
@@ -277,7 +285,7 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 
 ## React: bank payment intent (Plaid / ACH)
 
-Bank `amount` is a **required** major-currency decimal string (`"50.00"` for $50.00), same as wallets, and **defaults to `"0"`**. On open-amount forms that start at 0, the SDK keeps the routing/account fields — 0 is typically under the ACH threshold, so **Connect bank account** (Plaid Link) stays hidden until the customer enters a qualifying charge. For setup (save bank), pass `intent="setup"` — that always shows Connect (no merchant lookup) unless the render token disables verification.
+For payment intents, pass `requireAchVerification` when your host-side rule requires **Connect bank account** (Plaid Link). For setup (save bank), pass `intent="setup"` — that always shows Connect unless the render token disables verification.
 
 Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
 
@@ -315,7 +323,7 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
       <AmosBankAccountPaymentMethodForm
         ref={iframeRef}
         renderToken={renderToken}
-        amount="50.00"
+        requireAchVerification
         // intent="setup" // save a bank account — always Connect unless verification is disabled
         onValidityChange={({ isValid }) => setIsValid(isValid)}
       />
@@ -338,7 +346,7 @@ import { useState } from "react";
 import {
   AmosGooglePayButton,
   AmosApplePayButton,
-  type ConfirmResult,
+  type ConfirmPaymentResult,
 } from "@amos.com/react-amos-js";
 import type { components } from "@amos.com/node";
 
@@ -352,8 +360,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
   }: {
     paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
     customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
-    confirmPayment: (token: string) => Promise<ConfirmResult>;
-  }): Promise<ConfirmResult> {
+    confirmPayment: (token: string) => Promise<ConfirmPaymentResult>;
+  }): Promise<ConfirmPaymentResult> {
     try {
       const res = await fetch("/api/payment-intents", {
         method: "POST",
@@ -421,7 +429,6 @@ return (
       <AmosBankAccountPaymentMethodForm
         ref={bankRef}
         renderToken={renderToken}
-        amount="0"
       />
     </div>
   </>
@@ -469,7 +476,7 @@ document.querySelector("#pay")!.addEventListener("click", async () => {
 import {
   mountAmosApplePayButton,
   mountAmosGooglePayButton,
-  type ConfirmResult,
+  type ConfirmPaymentResult,
 } from "@amos.com/amos-js";
 import type { components } from "@amos.com/node";
 
@@ -484,8 +491,8 @@ const shared = {
   }: {
     paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
     customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
-    confirmPayment: (token: string) => Promise<ConfirmResult>;
-  }): Promise<ConfirmResult> => {
+    confirmPayment: (token: string) => Promise<ConfirmPaymentResult>;
+  }): Promise<ConfirmPaymentResult> => {
     const response = await fetch("/api/payment-intents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -510,14 +517,19 @@ import { mountAmosBankAccountPaymentMethodForm } from "@amos.com/amos-js";
 
 const bank = mountAmosBankAccountPaymentMethodForm("#bank-form", {
   renderToken: RENDER_TOKEN,
-  amount: "50.00", // defaults to "0" (manual form until the charge meets the threshold)
+  requireAchVerification: true,
   // intent: "setup", // save a bank account — always Connect unless verification is disabled
+  defaultValues: {
+    name: "Alex Example",
+    billingAddress: { country: "US", postalCode: "90210" },
+  },
   onValidityChange: ({ isValid }) => {
     document.querySelector("#pay")!.toggleAttribute("disabled", !isValid);
   },
 });
 
-bank.update({ amount: "25.00" });
+bank.update({ requireAchVerification: false });
+bank.focus("accountHolderName");
 ```
 
 ## Appearance

@@ -8,10 +8,10 @@ description: >-
   payment intents or setup intents (save a payment method without charging),
   awaiting confirmPayment / confirmSetup (ConfirmResult), onConfirm for
   wallets, calling api.amos.com, resetForm, onResult, onValidityChange,
-  onCardBrandChanged, payment method tabs, wallet buttonProps / iframeProps,
-  Plaid Link / ACH verification / Connect bank account, bank amount / intent,
-  render token verification, last_payment_error, or debugging blank iframes /
-  confirm failures / Signature has expired.
+  onCardBrandChanged, defaultValues, focusField, payment method tabs, wallet
+  buttonProps / iframeProps, Plaid Link / ACH verification / Connect bank
+  account, requireAchVerification / intent, render token verification, or
+  debugging blank iframes / confirm failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -25,7 +25,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Client packages (current majors): `@amos.com/amos-js` (~0.11.3), `@amos.com/react-amos-js` (~0.11.2), `@amos.com/node` (~0.1.54, peer `>=0.1.53`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.8, `@amos.com/react-amos-js` 0.11.6, and `@amos.com/node` 0.1.57 (peer `>=0.1.53`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -145,17 +145,23 @@ Canonical helpers: **`confirmPayment`** (payment intent) and **`confirmSetup`** 
 They return **`Promise<ConfirmResult>`**. **Await** them so you can stop spinners. Confirm is **synchronous authorization**: the Promise settles after the processor approves or declines (60s timeout → `failed`).
 
 ```ts
-type ConfirmResult = { status: "succeeded" } | { status: "failed" };
+type ConfirmPaymentResult =
+  | { status: "succeeded"; paymentIntent: PaymentIntent }
+  | { status: "failed"; paymentIntent?: PaymentIntent };
+
+type ConfirmSetupResult =
+  | { status: "succeeded"; setupIntent: SetupIntent }
+  | { status: "failed"; setupIntent?: SetupIntent };
 ```
 
 | `status` | Meaning | Host action |
 |----------|---------|-------------|
-| `succeeded` | Processor **authorized** (sale completed for `capture_method: "automatic"`). Capture for **`automatic_async` may still finish asynchronously**. | Run success UX; **verify via webhook or server retrieve** (not settlement proof). Retrieve may include `last_payment_error` after a decline. |
+| `succeeded` | Processor **authorized** (sale completed for `capture_method: "automatic"`). Capture for **`automatic_async` may still finish asynchronously**. | Run success UX; **verify via webhook or server retrieve** (not settlement proof). |
 | `failed` | Declined, validation, timeout, or other failure. Recoverable **field errors stay in the iframe**. | Unlock UI. Do **not** duplicate per-field errors on the host. Customer can fix and retry. Optional generic banner is OK. |
 
-`ConfirmResult` does **not** include the intent object or `errorMessage`. Retrieve `GET /payment_intents/{id}` / `GET /setup_intents/{id}` (or wait for webhooks) for state.
+When the confirm API returned a body, the result includes `paymentIntent` or `setupIntent`. Payment intents expose failure `state`; `last_payment_error` has been removed. Retrieve server-side or wait for webhooks when the result has no intent.
 
-To clear fields and API errors without remounting (e.g. after success when starting another payment), call **`resetForm`** with the same iframe ref/element. On bank, `resetForm` also disconnects Plaid.
+To clear fields and API errors without remounting (e.g. after success when starting another payment), call **`resetForm`** with the same iframe ref/element. It restores the latest mounted/updated `defaultValues`; on bank it also disconnects Plaid.
 
 **Removed (do not use):** `onResult` / `ConfirmationResult` / `incomplete`, `confirmPaymentIntent` / `confirmSetupIntent`, `onPaymentIntentConfirmationSucceeded`, `onSetupIntentConfirmationSucceeded`, `onConfirmationFailed`.
 
@@ -213,32 +219,53 @@ Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) o
 7. Unlock from `result.status`. On `failed`, field errors are already in the iframe; on `succeeded`, run success UX then verify server-side.
 8. Optional: `resetForm({ iframeRef })` after confirm when clearing the form for another attempt (without destroying the mount).
 
-Optional props: `appearance` (**card/bank only** — also styles the parent-page **Connect bank account** button), `onValidityChange`, card `onCardBrandChanged`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`. Bank **`amount`** (major-currency decimal, e.g. `"50.00"`, defaults to `"0"`) and **`intent?: "payment" | "setup"`** (see Plaid below).
+Optional props: `appearance` (**card/bank only** — also styles the parent-page **Connect bank account** button), `defaultValues`, `onValidityChange`, card `onCardBrandChanged`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`. Bank supports **`requireAchVerification?: boolean`** and **`intent?: "payment" | "setup"`** (see Plaid below).
 
 Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic), then `validateForm({ iframe: form.iframe })` and `await confirmPayment({ iframe: form.iframe, token })` (or `confirmSetup`). Pass `onValidityChange` on mount; card: `onCardBrandChanged`. Bank: pass `amount` (defaults to `"0"`; `update({ amount })` when it changes) and `intent: "setup"` when saving. Use `resetForm({ iframe: form.iframe })` to clear fields/errors (and disconnect Plaid) without remounting.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic), then `validateForm({ iframe: form.iframe })` and `await confirmPayment({ iframe: form.iframe, token })` (or `confirmSetup`). Pass `defaultValues` / `onValidityChange` on mount; card: `onCardBrandChanged`. Bank: pass `requireAchVerification: true` when the payment requires Plaid, and `intent: "setup"` when saving. Use `controller.update({ defaultValues })`, `controller.focus(field)`, and `resetForm({ iframe: form.iframe })` without remounting.
+
+## Populate and focus card/bank fields
+
+`defaultValues` accepts non-sensitive name and billing address fields only:
+
+```ts
+type PaymentMethodFormDefaultValues = {
+  name?: string;
+  billingAddress?: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
+};
+```
+
+- React: pass `defaultValues` to the card/bank component. Pass it to `confirmPayment` / `confirmSetup` for a one-confirm overlay that does not replace reset defaults.
+- Vanilla: pass it on mount or call `controller.update({ defaultValues })`.
+- Focus: React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)`. Calls queue until the iframe is ready and no-op for hidden, wrong-form, or Plaid-covered fields.
+- Never use defaults for PAN, CVC, routing number, or account number.
 
 ### Bank ACH / Plaid (Connect)
 
 When ACH verification is required, the SDK **hides the routing/account iframe** and renders a **Connect bank account** button on the parent page. Clicking it asks the iframe to mint a Plaid Link token, then opens [Plaid Link](https://plaid.com/docs/link/web/). After success: linked bank + Disconnect; `onValidityChange({ isValid: true })`. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers or Plaid secrets. Hosts do **not** call `GET /merchants` or `POST /plaid_link_tokens` (embed does that).
 
-**`amount`** (major-currency decimal `"50.00"`, same as wallets; **required**, defaults to `"0"`): compared locally once the iframe posts the threshold (cents). Ignored when `intent` is `"setup"`. Account `ach_threshold` is integer cents from the org (OpenAPI default **20000** = $200.00).
+**`requireAchVerification`** (boolean, default `false`): for payment intents, set this from your own business rule when Plaid is required. The Pay API no longer exposes `Account.ach_threshold`.
 
-**`intent`** (`"payment"` | `"setup"`, default `"payment"`): `"setup"` always shows Connect (no merchant threshold lookup). Changing `intent` remounts the bank iframe.
+**`intent`** (`"payment"` | `"setup"`, default `"payment"`): `"setup"` always shows Connect. Changing `intent` remounts the bank iframe.
 
 | When | Behavior |
 |------|----------|
 | Render token `verification: false` | Always manual bank form (no Connect, no `GET /merchants`) |
 | `intent: "setup"` (verification on) | Always Connect / Plaid |
-| `intent: "payment"`, omitted / `"0"` amount | Manual form unless threshold is `0` (open-amount stays on routing/account until a qualifying charge) |
-| `intent: "payment"`, cents `>=` threshold | Connect / Plaid |
-| `intent: "payment"`, under threshold | Manual form (Plaid credentials dropped if previously linked) |
-| No threshold (`null`) | Always manual bank form |
+| `intent: "payment"`, `requireAchVerification: true` | Connect / Plaid |
+| `intent: "payment"`, omitted/false `requireAchVerification` | Manual bank form |
 
-Pass `amount` and `update({ amount })` when the charge changes. `resetForm` also disconnects Plaid.
+Update `requireAchVerification` when the host rule changes. `resetForm` also disconnects Plaid.
 
 **Render template:** bank `allowed_payment_methods[].options.verification` — omitted/`true` enables Plaid; `false` disables it (dashboard **Disable verification**, e.g. virtual terminal). Encoded in the render token JWT.
 
@@ -291,17 +318,19 @@ Mismatch → blank iframe or method not allowed.
 | Custom card/bank/wallet loading UI | SDK already shows a field skeleton (card/bank) or button skeleton (GPay/Apple Pay); don’t overlay or hide the mount |
 | Tab switch remounts / flashes skeleton | Keep all method forms mounted; hide inactive tabs with CSS (`hidden`) |
 | Wrong confirm helper | Payment → `confirmPayment`; setup → `confirmSetup` |
-| `onResult` / `ConfirmationResult` / `incomplete` | Removed. Await `confirmPayment` / `confirmSetup`; `ConfirmResult` is only `succeeded` \| `failed` |
+| `onResult` / `ConfirmationResult` / `incomplete` | Removed. Await `confirmPayment` / `confirmSetup`; branch on `status` and use the optional returned intent |
 | `confirmPaymentIntent` / `confirmSetupIntent` | Removed. Use `confirmPayment` / `confirmSetup` |
 | Spinner never stops | Await confirm; both `succeeded` and `failed` unlock UI |
 | Need to clear form after success/retry | `resetForm({ iframeRef })` / `resetForm({ iframe })` — also disconnects Plaid; do not remount unless needed |
+| Need to populate name/address | Pass `defaultValues`; never pass sensitive account/card fields |
+| Need to focus an iframe field | React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)` |
 | Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
 | Using `onCardBrandChanged` as BIN/PAN | Event is `{ brand }` only (or `null`); card form only — not bank |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit / `onConfirm` after `validateForm` |
 | GPay/Apple Pay / bank `amount` types | Client prop: major-currency string `"50.00"`; Pay API / `paymentIntentCreateAttributes.amount`: number `5000` (cents). Passing `"5000"` to a wallet button charges $5,000. |
-| Setup bank still shows routing/account | Pass `intent: "setup"` (do not fake this with a large `amount`) |
-| Connect never appears (payment) | Amount still `"0"` / under threshold; no merchant threshold; or render token `verification: false` |
+| Setup bank still shows routing/account | Pass `intent: "setup"` |
+| Connect never appears (payment) | Pass `requireAchVerification: true`; ensure render-token `verification` is not false |
 | Inventing a Connect button / calling Plaid yourself | Use the bank mount; SDK shows Connect and opens Plaid Link |
 | CSP blocks Plaid / Connect click fails | Allow `cdn.plaid.com` + `*.plaid.com` on the **parent** page |
 | Proxying `GET /merchants` or `POST /plaid_link_tokens` | Embed mints link tokens; merchant server only creates intents |
@@ -311,15 +340,16 @@ Mismatch → blank iframe or method not allowed.
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
 | Mixing sandbox key + prod token | Align dashboard, render token, API key, base URL |
 | `PAY_API_*` / `pay.amos.com` | Current `@amos.com/node`: `AMOS_API_*` + `api.amos.com` / `api-sandbox.amos.com` |
-| Treating confirm `succeeded` as captured | `automatic_async` capture may still be in flight; verify webhook / retrieve (`last_payment_error` after decline) |
+| Reading `last_payment_error` | Removed from `PaymentIntent`; use returned intent `state`, retrieve, or webhooks |
+| Treating confirm `succeeded` as captured | `automatic_async` capture may still be in flight; verify webhook / retrieve |
 
 ## Agent workflow
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client form with **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button. On card, optional **`onCardBrandChanged`**. On bank, pass **`amount`** (defaults to `"0"`; live charge for payments) and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
-4. Handle `succeeded` / `failed` on `ConfirmResult`; remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`). After a decline, retrieve may include `last_payment_error`.
-5. Read installed package versions if APIs look unfamiliar — **0.11.3+ / 0.11.2+** client SDKs use `confirmPayment` / `confirmSetup` (`Promise<ConfirmResult>`), wallet **`onConfirm`** (not `onInitiatePaymentIntentRequest` or `onResult`), `onValidityChange`, card `onCardBrandChanged`, `resetForm`, card/bank **and wallet** loading skeletons, bank `amount` (default `"0"`) + `intent` + Plaid Connect (unless render-token `verification: false`), and wallet `height` / `buttonProps` / `iframeProps` (not `fullWidth` or top-level `buttonType` / `buttonStyle`). Peer `@amos.com/node` `>=0.1.53`.
+3. Scaffold client form with **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
+4. Handle `succeeded` / `failed`; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent`, and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.53`.
 
 ## Additional resources
 
