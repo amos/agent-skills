@@ -8,10 +8,11 @@ description: >-
   payment intents or setup intents (save a payment method without charging),
   awaiting confirmPayment / confirmSetup and their result types, onConfirm for
   wallets, calling api.amos.com, resetForm, onResult, onValidityChange,
-  onCardBrandChanged, defaultValues, focusField, payment method tabs, wallet
-  buttonProps / iframeProps, Plaid Link / ACH verification / Connect bank
-  account, requireAchVerification / intent, render token verification, or
-  debugging blank iframes / confirm failures / Signature has expired.
+  onCardBrandChanged, defaultValues, focusField, Enter key / host form submit /
+  FORM_SUBMIT_REQUEST, payment method tabs, wallet buttonProps / iframeProps,
+  Plaid Link / ACH verification / Connect bank account, requireAchVerification /
+  intent, render token verification, or debugging blank iframes / confirm
+  failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -173,11 +174,27 @@ Optional. The iframe posts `{ isValid }` when required fields become valid or in
 
 Optional. The credit-card iframe posts `{ brand }` when the detected network changes (**no PCI data** — no PAN, last4, or BIN). `brand` is `"visa"` | `"mastercard"` | `"amex"` | `"discover"` | `"diners"` | `"jcb"`, or `null` when the field is empty or the digits do not match a known brand. Never fired for bank. Use it for host UX (icons, surcharge copy) — not as a substitute for `validateForm`.
 
+## Enter in the iframe (card / bank — Stripe pattern)
+
+The card/bank iframe is **cross-origin**. The parent **cannot** see Enter while focus is inside it (`keydown` on `window` will not fire). Do **not** invent `onSubmitRequest` or a host key listener.
+
+**Required:** wrap the mount in a host `<form>` and handle **that form’s `submit`**. Enter in the iframe posts PCI-safe `{ type: "FORM_SUBMIT_REQUEST" }` (no field values); the SDK calls `requestSubmit()` on the enclosing form. Same handler as the Pay/Save button (`type="submit"`). Always `preventDefault` in `onSubmit`.
+
+No enclosing `<form>` → no-op. Plaid Connect showing (bank iframe hidden) → no-op. Parent fields (email, amount) still submit on Enter when *they* are focused.
+
+```tsx
+<form onSubmit={handleSubmit}>
+  <AmosCreditCardPaymentMethodForm ref={iframeRef} renderToken={renderToken} />
+  <button type="submit">Pay now</button>
+</form>
+```
+
 ## Non-express flow (card / bank)
 
 ```
-mount form (render token) [+ onValidityChange]
+mount form inside host <form> (render token) [+ onValidityChange]
   → user fills iframe
+  → Pay click OR Enter in iframe  →  host submit
   → validateForm
   → your server creates intent   ← embed token minted here
   → await confirmPayment / confirmSetup
@@ -193,7 +210,7 @@ mount form (render token) [+ onValidityChange]
 
 ### Tabs / multiple methods (keep mounted)
 
-If checkout switches between methods (card, bank, etc.) with tabs or similar UI, **mount every form you offer up front** and hide inactive ones with CSS. Do not mount only the selected tab.
+If checkout switches between methods (card, bank, etc.) with tabs or similar UI, **mount every form you offer up front** and hide inactive ones with CSS. Do not mount only the selected tab. Still wrap them in **one host `<form>`** so Enter in the visible iframe submits checkout.
 
 Unmounting on tab change reloads the iframe and re-shows the skeleton. Keeping all mounts in the DOM (visually hidden when inactive) means a tab switch is instant.
 
@@ -210,10 +227,10 @@ Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) o
 
 ### React
 
-1. Render `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` with `renderToken`. The component mounts into a wrapper `div`; **`ref` still points at the iframe**.
+1. Wrap `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` in a host `<form onSubmit={…}>`. The component mounts into a wrapper `div`; **`ref` still points at the iframe**.
 2. Keep `ref` on the component; pass the **same** `iframeRef` to helpers (not the wrapper).
 3. Optional: `onValidityChange={({ isValid }) => …}` to enable/disable the submit button. Card only: `onCardBrandChanged={({ brand }) => …}`.
-4. On submit: `await validateForm({ iframeRef })` → if false, stop.
+4. On **form `submit`** (Pay button **or** Enter in the iframe): `preventDefault`, then `await validateForm({ iframeRef })` → if false, stop. Do not attach a parent `keydown` for Enter.
 5. Call **your** backend → `{ token }`.
 6. Immediately `const result = await confirmPayment({ iframeRef, token })` or `await confirmSetup(...)`.
 7. Unlock from `result.status`. On `failed`, field errors are already in the iframe; on `succeeded`, run success UX then verify server-side.
@@ -225,7 +242,7 @@ Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic), then `validateForm({ iframe: form.iframe })` and `await confirmPayment({ iframe: form.iframe, token })` (or `confirmSetup`). Pass `defaultValues` / `onValidityChange` on mount; card: `onCardBrandChanged`. Bank: pass `requireAchVerification: true` when the payment requires Plaid, and `intent: "setup"` when saving. Use `controller.update({ defaultValues })`, `controller.focus(field)`, and `resetForm({ iframe: form.iframe })` without remounting.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic) **inside a host `<form>`**, then listen to that form’s `submit` (not only a button `click`). `validateForm({ iframe: card.iframe })` and `await confirmPayment({ iframe: card.iframe, token })` (or `confirmSetup`). Pass `defaultValues` / `onValidityChange` on mount; card: `onCardBrandChanged`. Bank: pass `requireAchVerification: true` when the payment requires Plaid, and `intent: "setup"` when saving. Use `controller.update({ defaultValues })`, `controller.focus(field)`, and `resetForm({ iframe: card.iframe })` without remounting.
 
 ## Populate and focus card/bank fields
 
@@ -325,6 +342,8 @@ Mismatch → blank iframe or method not allowed.
 | Need to populate name/address | Pass `defaultValues`; never pass sensitive account/card fields |
 | Need to focus an iframe field | React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)` |
 | Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
+| Enter in iframe does nothing | Wrap the mount in a host `<form>` and handle `submit` (`preventDefault`). Parent `keydown` cannot see keys in the cross-origin iframe. |
+| Inventing `onSubmitRequest` / host Enter listener | Do not add a callback or parent `keydown`. SDK submits the enclosing form (`FORM_SUBMIT_REQUEST`). Pay button `type="submit"`. Guard `processing` so Enter cannot double-submit. |
 | Using `onCardBrandChanged` as BIN/PAN | Event is `{ brand }` only (or `null`); card form only — not bank |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit / `onConfirm` after `validateForm` |
@@ -346,9 +365,9 @@ Mismatch → blank iframe or method not allowed.
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client form with **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
+3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `succeeded` / `failed`; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent`, and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.53`.
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, host-form Enter submit, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent`, and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.53`.
 
 ## Additional resources
 

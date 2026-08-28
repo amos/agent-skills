@@ -132,6 +132,8 @@ export async function createSetupIntent(input: { customerId?: string }) {
 
 ## React: card payment intent
 
+Wrap the component in a host `<form>`. Enter in the iframe submits it (the parent cannot listen for that key). Pay button must be `type="submit"`.
+
 ```tsx
 import { useRef, useState } from "react";
 import {
@@ -410,13 +412,13 @@ Apple Pay: Safari uses the native sheet; other browsers open Apple's QR popup. T
 
 ## React: method tabs (keep mounted)
 
-Mount every method you offer. Hide inactive panels with CSS — do not unmount on tab change (that reloads the iframe and re-shows the skeleton).
+Mount every method you offer. Hide inactive panels with CSS — do not unmount on tab change (that reloads the iframe and re-shows the skeleton). Wrap the mounts in a host `<form>` so Enter in either iframe still submits.
 
 ```tsx
 const [method, setMethod] = useState<"card" | "bank">("card");
 
 return (
-  <>
+  <form onSubmit={onSubmit}>
     <button type="button" onClick={() => setMethod("card")}>Card</button>
     <button type="button" onClick={() => setMethod("bank")}>Bank</button>
     <div hidden={method !== "card"}>
@@ -431,13 +433,16 @@ return (
         renderToken={renderToken}
       />
     </div>
-  </>
+    <button type="submit">Pay</button>
+  </form>
 );
 ```
 
 Confirm/validate against the selected method’s `iframeRef`.
 
 ## Vanilla: card payment intent
+
+Mount **inside a host `<form>`**. Enter in the iframe submits it (same as Stripe Elements). Listen to `submit`, not only a button `click`.
 
 ```ts
 import {
@@ -447,7 +452,7 @@ import {
   resetForm,
 } from "@amos.com/amos-js";
 
-const form = mountAmosCreditCardPaymentMethodForm("#card-form", {
+const card = mountAmosCreditCardPaymentMethodForm("#card-form", {
   renderToken: RENDER_TOKEN,
   additionalFields: { cardholderName: true },
   onValidityChange: ({ isValid }) => {
@@ -458,14 +463,15 @@ const form = mountAmosCreditCardPaymentMethodForm("#card-form", {
   },
 });
 
-document.querySelector("#pay")!.addEventListener("click", async () => {
-  if (!(await validateForm({ iframe: form.iframe }))) return;
+document.querySelector("#checkout")!.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!(await validateForm({ iframe: card.iframe }))) return;
   const { token } = await fetch("/api/payment-intents", { method: "POST" }).then(
     (r) => r.json(),
   );
-  const result = await confirmPayment({ iframe: form.iframe, token });
+  const result = await confirmPayment({ iframe: card.iframe, token });
   if (result.status === "succeeded") {
-    // Optional: resetForm({ iframe: form.iframe }) before another payment
+    // Optional: resetForm({ iframe: card.iframe }) before another payment
   }
 });
 ```
