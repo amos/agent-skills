@@ -141,6 +141,7 @@ import {
   type ConfirmPaymentResult,
   confirmPayment,
   focusField,
+  isConfirmTimeout,
   resetForm,
   validateForm,
 } from "@amos.com/react-amos-js";
@@ -180,11 +181,15 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
 
       const { token } = (await res.json()) as { token: string };
       const result: ConfirmPaymentResult = await confirmPayment({ iframeRef, token });
+      if (isConfirmTimeout(result)) {
+        setError("Payment is taking longer than expected. Do not retry yet.");
+        return;
+      }
       if (result.status === "succeeded") {
         setDone(true);
         return;
       }
-      // failed: field errors stay in the iframe; unlock UI
+      // declined / validation: field errors stay in the iframe; unlock UI
       setError("Payment failed. Please try again.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -348,6 +353,7 @@ import { useState } from "react";
 import {
   AmosGooglePayButton,
   AmosApplePayButton,
+  isConfirmTimeout,
   type ConfirmPaymentResult,
 } from "@amos.com/react-amos-js";
 import type { components } from "@amos.com/node";
@@ -376,7 +382,11 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
       if (!res.ok) throw new Error("Failed to create payment intent.");
       const { token } = (await res.json()) as { token: string };
       const result = await confirmPayment(token);
-      if (result.status === "failed") setError("Payment failed. Please try again.");
+      if (isConfirmTimeout(result)) {
+        setError("Payment is taking longer than expected. Do not retry yet.");
+      } else if (result.status === "failed") {
+        setError("Payment failed. Please try again.");
+      }
       return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -449,6 +459,7 @@ import {
   mountAmosCreditCardPaymentMethodForm,
   validateForm,
   confirmPayment,
+  isConfirmTimeout,
   resetForm,
 } from "@amos.com/amos-js";
 
@@ -470,6 +481,10 @@ document.querySelector("#checkout")!.addEventListener("submit", async (event) =>
     (r) => r.json(),
   );
   const result = await confirmPayment({ iframe: card.iframe, token });
+  if (isConfirmTimeout(result)) {
+    // Uncertain — do not retry as a new payment
+    return;
+  }
   if (result.status === "succeeded") {
     // Optional: resetForm({ iframe: card.iframe }) before another payment
   }
@@ -561,6 +576,6 @@ appearance={{
 }}
 ```
 
-Pair `fonts` with `--font-family`. Omit both on first paint to get Inter. `fonts: []` skips the webfont (system stack). Wallet buttons do not take `appearance`.
+Pair `fonts` with `--font-family`. Omit both on first paint to get Inter. `fonts: []` skips the webfont (system stack). `themeVariables` **replaces** the override set — restating `{ "--primary": "…" }` drops other keys (omitted `--font-family` is filled with Inter). Wallet buttons do not take `appearance`.
 
 Modal: pass `onEscapeKeyPressed` on the card/bank component so Escape inside the iframe can close it.

@@ -190,7 +190,7 @@ Canonical search params so the embed router does not 307. Appearance is **not** 
 | `mountAmosGooglePayButton` | GPay |
 | `mountAmosApplePayButton` | Apple Pay |
 | `validateForm({ iframe })` | `Promise<boolean>` (5s timeout → `false`; Plaid mode resolves immediately from linked state) |
-| `confirmPayment` / `confirmSetup` | Non-express confirm — `Promise<ConfirmPaymentResult>` / `Promise<ConfirmSetupResult>` (60s timeout → `failed`) |
+| `confirmPayment` / `confirmSetup` | Non-express confirm — `Promise<ConfirmPaymentResult>` / `Promise<ConfirmSetupResult>` (15s → `{ status: "failed", error: "timeout" }`; use `isConfirmTimeout`) |
 | `resetForm({ iframe })` | Clear fields/errors, restore mounted/updated defaults, and disconnect Plaid |
 | `updateDefaultValues` / `focusField` | Populate safe name/address defaults or focus a named field |
 | `controller.update` / `focus` / `destroy` | Patch options, focus a field, or tear down |
@@ -231,7 +231,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 | `resetForm({ iframeRef })` | Clear fields/errors, restore defaults, and disconnect Plaid |
 | `focusField({ iframeRef, field })` | Focus a named card/bank field |
 
-No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.57` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.57` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `isConfirmTimeout`, `CONFIRM_TIMEOUT_MS`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
 
 All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
@@ -240,14 +240,18 @@ All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetF
 ```ts
 type ConfirmPaymentResult =
   | { status: "succeeded"; paymentIntent: PaymentIntent }
+  | { status: "failed"; error: "timeout" }
   | { status: "failed"; paymentIntent?: PaymentIntent };
 
 type ConfirmSetupResult =
   | { status: "succeeded"; setupIntent: SetupIntent }
+  | { status: "failed"; error: "timeout" }
   | { status: "failed"; setupIntent?: SetupIntent };
 ```
 
-Await `confirmPayment` / `confirmSetup`. On `failed`, field errors are shown under iframe fields and the returned intent is optional. On `succeeded`, drive success UX from the required returned intent, then verify via webhook / server retrieve. There is no `errorMessage` or `incomplete`.
+Await `confirmPayment` / `confirmSetup`. On decline `failed`, field errors are shown under iframe fields and the returned intent is optional (use `state`). On `succeeded`, drive success UX from the required returned intent, then verify via webhook / server retrieve. There is no `errorMessage` or `incomplete`.
+
+`{ status: "failed", error: "timeout" }` (`isConfirmTimeout(result)`) is **not** a decline. Embed aborts hung `/confirm` at 10s and posts the same shape; the SDK wait is 15s (`CONFIRM_TIMEOUT_MS`). Do not retry as a new payment.
 
 ### Express button chrome (optional)
 
@@ -291,9 +295,9 @@ type FontSource =
 
 **Card/bank only** — wallet buttons do not take `appearance`. Applied after handshake via `UPDATE_APPEARANCE` (not the iframe URL). On bank, `themeVariables` also style the parent-page Plaid panel (unset vars inherit from the host page). Full `ThemeVariable` list (including `--font-family`) is in the installed SDK README.
 
-**Merge vs replace** (mount helpers / React): `themeVariables` **merges** onto the last set (patch `--primary` without restating `--font-family`). `fonts`, `rules`, and `labels` **replace** when provided (`fonts: []` / `rules: {}` clears); omit to keep the previous value.
+**Replace model** (iframe + mount / React `update`): including `themeVariables` / `fonts` / `rules` sets the full override; omit to keep the previous value. `fonts: []` / `rules: {}` clears. Unlisted `themeVariables` revert to iframe defaults. A `themeVariables` payload that omits `--font-family` still gets Inter filled in (`appearanceWithDefaults`); `fonts: []` on that payload uses the system stack instead. Do not call `appearanceWithDefaults` yourself unless wiring `UPDATE_APPEARANCE` by hand (`initial: true` only on the first post after `IFRAME_READY`; `{ initial }` is required).
 
-**Fonts.** `https:` only, max 8. Omitted `fonts` + omitted `--font-family` on first paint → SDK sends Google Fonts Inter and `--font-family: Inter, ui-sans-serif, system-ui, sans-serif`. `fonts: []` without `--font-family` → `ui-sans-serif, system-ui, sans-serif`. Pair custom sources with `--font-family`. Iframe does not wait for webfonts. Self-hosted URLs must CORS-allow `js.amos.com` / `js-sandbox.amos.com`. Do not call `appearanceWithDefaults` yourself unless wiring `UPDATE_APPEARANCE` by hand (`initial: true` only on the first post after `IFRAME_READY`).
+**Fonts.** `https:` only, max 8. Omitted `fonts` + omitted `--font-family` on first paint → SDK sends Google Fonts Inter and `--font-family: Inter, ui-sans-serif, system-ui, sans-serif`. `fonts: []` without `--font-family` → `ui-sans-serif, system-ui, sans-serif`. Pair custom sources with `--font-family`. Iframe does not wait for webfonts.
 
 The host skeleton copies `themeVariables` and resting **`.Input` / `.Label`** rules. It does not inject webfonts.
 

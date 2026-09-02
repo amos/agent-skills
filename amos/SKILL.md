@@ -12,8 +12,9 @@ description: >-
   FORM_SUBMIT_REQUEST, payment method tabs, wallet buttonProps / iframeProps,
   Plaid Embedded Institution Search / Plaid Link / ACH verification /
   requireAchVerification / intent, appearance fonts / rules / --font-family,
-  onEscapeKeyPressed, render token verification, or debugging blank iframes /
-  confirm failures / Signature has expired.
+  onEscapeKeyPressed, isConfirmTimeout / confirm timeout, render token
+  verification, or debugging blank iframes / confirm failures / Signature has
+  expired.
 ---
 
 # Amos (embed payment methods)
@@ -27,7 +28,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.15, `@amos.com/react-amos-js` 0.11.14, and `@amos.com/node` 0.1.58 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.16, `@amos.com/react-amos-js` 0.11.15, and `@amos.com/node` 0.1.58 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -146,24 +147,29 @@ Call from **submit / express `onConfirm`**. Do not create on page load. Map Pay 
 
 Canonical helpers: **`confirmPayment`** (payment intent) and **`confirmSetup`** (setup intent).
 
-They return **`Promise<ConfirmPaymentResult>`** / **`Promise<ConfirmSetupResult>`**. **Await** them so you can stop spinners. Confirm is **synchronous authorization**: the Promise settles after the processor approves or declines (60s timeout → `failed`).
+They return **`Promise<ConfirmPaymentResult>`** / **`Promise<ConfirmSetupResult>`**. **Await** them so you can stop spinners. Confirm is **synchronous authorization**: the Promise settles after the processor approves or declines, or after a timeout.
 
 ```ts
 type ConfirmPaymentResult =
   | { status: "succeeded"; paymentIntent: PaymentIntent }
+  | { status: "failed"; error: "timeout" }
   | { status: "failed"; paymentIntent?: PaymentIntent };
 
 type ConfirmSetupResult =
   | { status: "succeeded"; setupIntent: SetupIntent }
+  | { status: "failed"; error: "timeout" }
   | { status: "failed"; setupIntent?: SetupIntent };
 ```
 
-| `status` | Meaning | Host action |
-|----------|---------|-------------|
+| Result | Meaning | Host action |
+|--------|---------|-------------|
 | `succeeded` | Processor **authorized** (sale completed for `capture_method: "automatic"`). Capture for **`automatic_async` may still finish asynchronously**. | Run success UX; **verify via webhook or server retrieve** (not settlement proof). |
-| `failed` | Declined, validation, timeout, or other failure. Recoverable **field errors stay in the iframe**. | Unlock UI. Do **not** duplicate per-field errors on the host. Customer can fix and retry. Optional generic banner is OK. |
+| `failed` (no `error`) | Declined or validation. Recoverable **field errors stay in the iframe**. `paymentIntent` / `setupIntent` present when the confirm API returned a body — inspect **`state`**. | Unlock UI. Do **not** duplicate per-field errors on the host. Customer can fix and retry. Optional generic banner is OK. |
+| `failed` + `error: "timeout"` (`isConfirmTimeout(result)`) | Iframe did not post `CONFIRMATION_RESULT` within **15s** (`CONFIRM_TIMEOUT_MS`), or embed aborted hung `/confirm` at **10s**. **Not a decline** — the charge may still settle. | Unlock UI. Do **not** retry as a new payment. Verify via webhook / server retrieve. |
 
-When the confirm API returned a body, the result includes `paymentIntent` or `setupIntent`. Payment intents expose failure `state`; `last_payment_error` has been removed. Retrieve server-side or wait for webhooks when the result has no intent.
+Use **`isConfirmTimeout(result)`** (re-exported from both client SDKs). Do not treat a bare `{ status: "failed" }` as a timeout.
+
+When the confirm API returned a body, the result includes `paymentIntent` or `setupIntent`. Payment intents expose failure `state`; `last_payment_error` is not on the contract. Retrieve server-side or wait for webhooks when the result has no intent.
 
 To clear fields and API errors without remounting (e.g. after success when starting another payment), call **`resetForm`** with the same iframe ref/element. It restores the latest mounted/updated `defaultValues`; on bank it also disconnects Plaid.
 
@@ -209,16 +215,16 @@ appearance?: {
 }
 ```
 
-**Merge vs replace** (mount / React `update`):
+**Replace model** (mount / React `update`, same as the iframe):
 
 | Key | When provided | When omitted |
 |-----|----------------|--------------|
-| `themeVariables` | **Merges** onto the last set (patch `--primary` without restating `--font-family`) | Keep previous |
+| `themeVariables` | **Replace** the full override set. Unlisted variables revert to iframe defaults. | Keep previous |
 | `fonts` / `rules` / `labels` | **Replace** (`fonts: []` / `rules: {}` clears) | Keep previous |
 
-Unlisted `themeVariables` keys keep iframe defaults until overridden once.
+A `themeVariables` patch that omits `--font-family` still gets Inter filled in by `appearanceWithDefaults` (system stack if that payload also has `fonts: []`). Do not assume other keys like `--primary` or `--radius` are kept — restating `themeVariables` drops them unless you include them.
 
-**Fonts.** `https:` only (max 8). `{ cssSrc }` (Google Fonts CSS or self-hosted stylesheet — iframe injects `<link rel="stylesheet">`) or custom `{ family, src }` (`src` is a CSS `src` list of `url("https://…")`). Pair with `--font-family` so the loaded face is used. The iframe does **not** wait for webfonts (`font-display: swap`). Self-hosted font/CSS URLs must CORS-allow `js.amos.com` / `js-sandbox.amos.com`. Parent CSP does not need `fonts.googleapis.com` (loaded inside the iframe).
+**Fonts.** `https:` only (embed accepts max 8). `{ cssSrc }` (Google Fonts CSS or self-hosted stylesheet — iframe injects `<link rel="stylesheet">`) or custom `{ family, src }` (`src` is a CSS `src` list of `url("https://…")`). Pair with `--font-family` so the loaded face is used. The iframe does **not** wait for webfonts (`font-display: swap`). Parent CSP does not need `fonts.googleapis.com` (loaded inside the iframe).
 
 Default on first paint when `fonts` and `--font-family` are omitted: SDK sends Google Fonts Inter and `--font-family: Inter, ui-sans-serif, system-ui, sans-serif`. `fonts: []` without `--font-family` → system stack (`ui-sans-serif, system-ui, sans-serif`).
 
@@ -272,7 +278,7 @@ Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) o
 4. On **form `submit`** (Pay button **or** Enter in the iframe): `preventDefault`, then `await validateForm({ iframeRef })` → if false, stop. Do not attach a parent `keydown` for Enter.
 5. Call **your** backend → `{ token }`.
 6. Immediately `const result = await confirmPayment({ iframeRef, token })` or `await confirmSetup(...)`.
-7. Unlock from `result.status`. On `failed`, field errors are already in the iframe; on `succeeded`, run success UX then verify server-side.
+7. Unlock from the result. On `isConfirmTimeout(result)`, do not retry. On other `failed`, field errors are already in the iframe; on `succeeded`, run success UX then verify server-side.
 8. Optional: `resetForm({ iframeRef })` after confirm when clearing the form for another attempt (without destroying the mount).
 
 Optional props: `appearance` (**card/bank only** — fonts, rules, `themeVariables` including `--font-family`; also styles the parent-page **Plaid** panel), `defaultValues`, `onValidityChange`, `onEscapeKeyPressed`, card `onCardBrandChanged`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`. Bank supports **`requireAchVerification?: boolean`** and **`intent?: "payment" | "setup"`** (see Plaid below).
@@ -310,7 +316,7 @@ type PaymentMethodFormDefaultValues = {
 
 When ACH verification is required, the SDK **hides the routing/account iframe** and mounts [Plaid Embedded Institution Search](https://plaid.com/docs/link/embedded-institution-search/) (`Plaid.createEmbedded`) on the **parent** page. After success: linked bank + Disconnect; `onValidityChange({ isValid: true })`. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers, mint link tokens, or load Plaid yourself. Hosts do not proxy Pay API (`GET /merchants`, `POST /plaid_link_tokens`); the bank iframe does that.
 
-**`requireAchVerification`** (boolean, default `false`): for payment intents, set this from your own business rule when Plaid is required. The Pay API no longer exposes `Account.ach_threshold`.
+**`requireAchVerification`** (boolean, default `false`): for payment intents, set this from your own business rule when Plaid is required. Optional helper: `requiresAchVerification({ amount, achThreshold })` (integer cents). The Pay API no longer exposes `Account.ach_threshold` — hosts that still have a threshold compute this themselves.
 
 **`intent`** (`"payment"` | `"setup"`, default `"payment"`): `"setup"` always shows Plaid. Changing `intent` remounts the bank iframe.
 
@@ -376,7 +382,8 @@ Mismatch → blank iframe or method not allowed.
 | Wrong confirm helper | Payment → `confirmPayment`; setup → `confirmSetup` |
 | `onResult` / `ConfirmationResult` / `incomplete` | Removed. Await `confirmPayment` / `confirmSetup`; branch on `status` and use the optional returned intent |
 | `confirmPaymentIntent` / `confirmSetupIntent` | Removed. Use `confirmPayment` / `confirmSetup` |
-| Spinner never stops | Await confirm; both `succeeded` and `failed` unlock UI |
+| Spinner never stops | Await confirm; `succeeded`, decline `failed`, and timeout all unlock UI |
+| Confirm `failed` after ~15s / retrying a timeout | Use `isConfirmTimeout(result)`. Timeout is uncertain, not a decline — do not create a new intent and confirm again. Verify webhook / retrieve. |
 | Need to clear form after success/retry | `resetForm({ iframeRef })` / `resetForm({ iframe })` — also disconnects Plaid; do not remount unless needed |
 | Need to populate name/address | Pass `defaultValues`; never pass sensitive account/card fields |
 | Need to focus an iframe field | React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)` |
@@ -384,7 +391,8 @@ Mismatch → blank iframe or method not allowed.
 | Enter in iframe does nothing | Wrap the mount in a host `<form>` and handle `submit` (`preventDefault`). Parent `keydown` cannot see keys in the cross-origin iframe. |
 | Inventing `onSubmitRequest` / host Enter listener | Do not add a callback or parent `keydown`. SDK submits the enclosing form (`FORM_SUBMIT_REQUEST`). Pay button `type="submit"`. Guard `processing` so Enter cannot double-submit. |
 | Escape in iframe does not close the modal | Pass `onEscapeKeyPressed`. Parent `keydown` cannot see Escape in the iframe. Not fired while a dropdown / address list is open, or while Plaid is showing. |
-| Custom font not applied | Pair `appearance.fonts` with `--font-family`. `https:` only. Self-hosted URLs must CORS-allow the embed origin. `fonts: []` skips the webfont. |
+| Custom font not applied | Pair `appearance.fonts` with `--font-family`. `https:` only. `fonts: []` skips the webfont. |
+| Theme patch dropped `--primary` / `--radius` | `themeVariables` is **replace**, not merge. Restate every override you still want. Omitted `--font-family` is filled with Inter (or the system stack when `fonts: []`). |
 | Styling iframe fields from the host page | Use `appearance.rules` (Stripe-style `.Input` / `.Label` / …). You cannot target the iframe DOM. Unknown selectors/properties are ignored. |
 | Putting `appearance` on the iframe URL | Appearance is postMessage after handshake. Canonical src params are `token`, `additionalFields`, `billingAddressRequirement`, `intent` only. |
 | Using `onCardBrandChanged` as BIN/PAN | Event is `{ brand }` only (or `null`); card form only — not bank |
@@ -401,7 +409,7 @@ Mismatch → blank iframe or method not allowed.
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
 | Mixing sandbox key + prod token | Align dashboard, render token, API key, base URL |
 | `PAY_API_*` / `pay.amos.com` | Current `@amos.com/node`: `AMOS_API_*` + `api.amos.com` / `api-sandbox.amos.com` |
-| Reading `last_payment_error` | Removed from `PaymentIntent`; use returned intent `state`, retrieve, or webhooks |
+| Reading `last_payment_error` | Not on `PaymentIntent`; use returned intent `state`, retrieve, or webhooks |
 | Treating confirm `succeeded` as captured | `automatic_async` capture may still be in flight; verify webhook / retrieve |
 
 ## Agent workflow
@@ -409,8 +417,8 @@ Mismatch → blank iframe or method not allowed.
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
 3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
-4. Handle `succeeded` / `failed`; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family`, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search), and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.57`.
+4. Handle `succeeded` / `failed` / **`isConfirmTimeout`**; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search), and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.57`.
 
 ## Additional resources
 
