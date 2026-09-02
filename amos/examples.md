@@ -287,9 +287,9 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 
 ## React: bank payment intent (Plaid / ACH)
 
-For payment intents, pass `requireAchVerification` when your host-side rule requires **Connect bank account** (Plaid Link). For setup (save bank), pass `intent="setup"` — that always shows Connect unless the render token disables verification.
+For payment intents, pass `requireAchVerification` when your host-side rule requires **Plaid Embedded Institution Search**. For setup (save bank), pass `intent="setup"` — that always shows Plaid unless the render token disables verification.
 
-Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
+Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://js.amos.com https://js-sandbox.amos.com https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
 
 ```tsx
 import { useRef, useState } from "react";
@@ -326,7 +326,7 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
         ref={iframeRef}
         renderToken={renderToken}
         requireAchVerification
-        // intent="setup" // save a bank account — always Connect unless verification is disabled
+        // intent="setup" // save a bank account — always Plaid unless verification is disabled
         onValidityChange={({ isValid }) => setIsValid(isValid)}
       />
       <button type="submit" disabled={!isValid || processing}>
@@ -408,7 +408,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
 }
 ```
 
-Apple Pay: Safari uses the native sheet; other browsers open Apple's QR popup. The SDK shows a waiting overlay with Cancel — no host expand/collapse code needed.
+Apple Pay: Safari uses the native sheet; other browsers open Apple's QR popup. The SDK shows a waiting overlay with **Cancel payment** until the buyer authorizes, then **Completing your payment…** (no Cancel) until `onConfirm` settles — no host expand/collapse code needed.
 
 ## React: method tabs (keep mounted)
 
@@ -524,7 +524,7 @@ import { mountAmosBankAccountPaymentMethodForm } from "@amos.com/amos-js";
 const bank = mountAmosBankAccountPaymentMethodForm("#bank-form", {
   renderToken: RENDER_TOKEN,
   requireAchVerification: true,
-  // intent: "setup", // save a bank account — always Connect unless verification is disabled
+  // intent: "setup", // save a bank account — always Plaid unless verification is disabled
   defaultValues: {
     name: "Alex Example",
     billingAddress: { country: "US", postalCode: "90210" },
@@ -543,9 +543,24 @@ bank.focus("accountHolderName");
 ```tsx
 appearance={{
   labels: "floating",
+  fonts: [
+    {
+      cssSrc:
+        "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
+    },
+  ],
   themeVariables: {
     "--primary": "oklch(0.5 0.2 240)",
     "--radius": "0.5rem",
+    "--font-family": "Inter, ui-sans-serif, system-ui, sans-serif",
+  },
+  rules: {
+    ".Label": { fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" },
+    ".Input--invalid": { boxShadow: "0 0 0 2px oklch(0.55 0.245 27.325)" },
   },
 }}
 ```
+
+Pair `fonts` with `--font-family`. Omit both on first paint to get Inter. `fonts: []` skips the webfont (system stack). Wallet buttons do not take `appearance`.
+
+Modal: pass `onEscapeKeyPressed` on the card/bank component so Escape inside the iframe can close it.

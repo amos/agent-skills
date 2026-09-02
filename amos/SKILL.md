@@ -10,9 +10,10 @@ description: >-
   wallets, calling api.amos.com, resetForm, onResult, onValidityChange,
   onCardBrandChanged, defaultValues, focusField, Enter key / host form submit /
   FORM_SUBMIT_REQUEST, payment method tabs, wallet buttonProps / iframeProps,
-  Plaid Link / ACH verification / Connect bank account, requireAchVerification /
-  intent, render token verification, or debugging blank iframes / confirm
-  failures / Signature has expired.
+  Plaid Embedded Institution Search / Plaid Link / ACH verification /
+  requireAchVerification / intent, appearance fonts / rules / --font-family,
+  onEscapeKeyPressed, render token verification, or debugging blank iframes /
+  confirm failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -26,14 +27,14 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.8, `@amos.com/react-amos-js` 0.11.6, and `@amos.com/node` 0.1.57 (peer `>=0.1.53`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.15, `@amos.com/react-amos-js` 0.11.14, and `@amos.com/node` 0.1.58 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
 ```
 Merchant browser                              Amos
 ─────────────────                             ────
-@amos.com/amos-js  ──── postMessage ────►  embed*.amos.com iframe
+@amos.com/amos-js  ──── postMessage ────►  js*.amos.com iframe
   or react-amos-js                           (card / bank / google-pay / apple-pay)
 
 Merchant server (any language)
@@ -50,7 +51,7 @@ raw HTTP     ─┘
 | **Backend SDK / HTTP** | Merchant server → Pay API (secrets stay here) |
 | `@amos.com/amos-js` | Vanilla iframe mounts + messaging |
 | `@amos.com/react-amos-js` | React wrappers (re-exports amos-js) |
-| Embed app (`embed*.amos.com`) | Iframe **content** (not a partner dependency) |
+| Embed app (`js*.amos.com`) | Iframe **content** (not a partner dependency) |
 
 Docs: [docs.amos.com](https://docs.amos.com). Prefer `@amos.com/react-amos-js` in React; otherwise `@amos.com/amos-js`.
 
@@ -97,11 +98,13 @@ Same rule for setup (`await confirmSetup`) and payment intents. Prefetching an i
 |--|---------|------------|
 | Dashboard | `dashboard-sandbox.amos.com` | `dashboard.amos.com` |
 | Pay API | `https://api-sandbox.amos.com` | `https://api.amos.com` |
-| Embed | `https://embed-sandbox.amos.com` | `https://embed.amos.com` |
+| Embed | `https://js-sandbox.amos.com` | `https://js.amos.com` |
+
+Parent pages that pin CSP must allow `frame-src https://js.amos.com https://js-sandbox.amos.com` (and `Permissions-Policy payment=` for those origins) **before** picking up an SDK that uses the new hosts. Older SDKs still load `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete (`https://checkout.example.com`) or CSP-style wildcards (`https://*.example.com`).
 
 `@amos.com/node` exports `AMOS_API_BASE_URL_SANDBOX` / `AMOS_API_BASE_URL_PRODUCTION` and `AMOS_API_VERSION`. Do not use the old `PAY_API_*` names or `pay.amos.com` hosts.
 
-Client SDK picks embed host via `getEmbedOrigin(renderToken)`. Render templates also encode billing geography (`billing_address_options`: `us_only` + `allowed_states`, or `international` + `allowed_countries`). Addresses outside that set are rejected. Bank methods may set `options.verification` (`false` disables Plaid / Connect).
+Client SDK picks embed host via `getEmbedOrigin(renderToken)`. Render templates also encode billing geography (`billing_address_options`: `us_only` + `allowed_states`, or `international` + `allowed_countries`). Addresses outside that set are rejected. Bank methods may set `options.verification` (`false` disables Plaid).
 
 ## Decision tree
 
@@ -180,7 +183,7 @@ The card/bank iframe is **cross-origin**. The parent **cannot** see Enter while 
 
 **Required:** wrap the mount in a host `<form>` and handle **that form’s `submit`**. Enter in the iframe posts PCI-safe `{ type: "FORM_SUBMIT_REQUEST" }` (no field values); the SDK calls `requestSubmit()` on the enclosing form. Same handler as the Pay/Save button (`type="submit"`). Always `preventDefault` in `onSubmit`.
 
-No enclosing `<form>` → no-op. Plaid Connect showing (bank iframe hidden) → no-op. Parent fields (email, amount) still submit on Enter when *they* are focused.
+No enclosing `<form>` → no-op. Plaid Embedded Institution Search showing (bank iframe hidden) → no-op. Parent fields (email, amount) still submit on Enter when *they* are focused.
 
 ```tsx
 <form onSubmit={handleSubmit}>
@@ -188,6 +191,42 @@ No enclosing `<form>` → no-op. Plaid Connect showing (bank iframe hidden) → 
   <button type="submit">Pay now</button>
 </form>
 ```
+
+## Escape in the iframe (card / bank — modals)
+
+The iframe is **cross-origin**. Parent `keydown` cannot see Escape while focus is inside it. Pass **`onEscapeKeyPressed`** to close a host modal. PCI-safe (no field values). Not fired while an iframe dropdown or address suggestion list is open (that Escape dismisses the overlay first), or while Plaid Embedded Institution Search is showing. Do **not** invent a parent `keydown` listener for this.
+
+## Appearance (card / bank)
+
+Optional `appearance` on card/bank mounts. **Wallet buttons do not take `appearance`.** Applied after handshake via `UPDATE_APPEARANCE` — never put it on the iframe `src` (that 307s and breaks postMessage). Use the mount helpers / React components; do not invent `appearanceWithDefaults` or `amosReload`.
+
+```ts
+appearance?: {
+  labels?: "above" | "floating" | "placeholder";
+  themeVariables?: Partial<Record<ThemeVariable, string>>;
+  fonts?: FontSource[]; // { cssSrc } | { family, src, display?, style?, weight?, unicodeRange? }
+  rules?: Partial<Record<AppearanceRuleSelector, AppearanceRuleDeclarations>>;
+}
+```
+
+**Merge vs replace** (mount / React `update`):
+
+| Key | When provided | When omitted |
+|-----|----------------|--------------|
+| `themeVariables` | **Merges** onto the last set (patch `--primary` without restating `--font-family`) | Keep previous |
+| `fonts` / `rules` / `labels` | **Replace** (`fonts: []` / `rules: {}` clears) | Keep previous |
+
+Unlisted `themeVariables` keys keep iframe defaults until overridden once.
+
+**Fonts.** `https:` only (max 8). `{ cssSrc }` (Google Fonts CSS or self-hosted stylesheet — iframe injects `<link rel="stylesheet">`) or custom `{ family, src }` (`src` is a CSS `src` list of `url("https://…")`). Pair with `--font-family` so the loaded face is used. The iframe does **not** wait for webfonts (`font-display: swap`). Self-hosted font/CSS URLs must CORS-allow `js.amos.com` / `js-sandbox.amos.com`. Parent CSP does not need `fonts.googleapis.com` (loaded inside the iframe).
+
+Default on first paint when `fonts` and `--font-family` are omitted: SDK sends Google Fonts Inter and `--font-family: Inter, ui-sans-serif, system-ui, sans-serif`. `fonts: []` without `--font-family` → system stack (`ui-sans-serif, system-ui, sans-serif`).
+
+The host skeleton copies `themeVariables` and resting **`.Input` / `.Label`** rules. It does **not** inject webfonts — load the face on the host page if the skeleton should match; otherwise it uses `ui-sans-serif, system-ui, sans-serif`.
+
+**Rules.** Stripe-style class names (`.Input`, `.Label`, `.Error`, …) mapped onto iframe slots — you cannot style the iframe DOM from the host. They override `themeVariables` for the properties they set. Values may be `var(--primary)` (allowlisted theme tokens, no fallback). Unknown selectors/properties are ignored. `--input-height` / `--floating-input-height` are a **minimum**; `.Input` `padding` / `fontSize` / `lineHeight` can grow the field. Selectors and declaration keys: [api-reference.md](api-reference.md).
+
+On bank, `themeVariables` also style the parent-page Plaid panel (unset vars inherit from the host page).
 
 ## Non-express flow (card / bank)
 
@@ -229,20 +268,20 @@ Same for vanilla: call each `mount*` once; toggle `hidden` (or equivalent CSS) o
 
 1. Wrap `AmosCreditCardPaymentMethodForm` or `AmosBankAccountPaymentMethodForm` in a host `<form onSubmit={…}>`. The component mounts into a wrapper `div`; **`ref` still points at the iframe**.
 2. Keep `ref` on the component; pass the **same** `iframeRef` to helpers (not the wrapper).
-3. Optional: `onValidityChange={({ isValid }) => …}` to enable/disable the submit button. Card only: `onCardBrandChanged={({ brand }) => …}`.
+3. Optional: `onValidityChange={({ isValid }) => …}` to enable/disable the submit button. Card only: `onCardBrandChanged={({ brand }) => …}`. Modal: `onEscapeKeyPressed` to close it.
 4. On **form `submit`** (Pay button **or** Enter in the iframe): `preventDefault`, then `await validateForm({ iframeRef })` → if false, stop. Do not attach a parent `keydown` for Enter.
 5. Call **your** backend → `{ token }`.
 6. Immediately `const result = await confirmPayment({ iframeRef, token })` or `await confirmSetup(...)`.
 7. Unlock from `result.status`. On `failed`, field errors are already in the iframe; on `succeeded`, run success UX then verify server-side.
 8. Optional: `resetForm({ iframeRef })` after confirm when clearing the form for another attempt (without destroying the mount).
 
-Optional props: `appearance` (**card/bank only** — also styles the parent-page **Connect bank account** button), `defaultValues`, `onValidityChange`, card `onCardBrandChanged`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`. Bank supports **`requireAchVerification?: boolean`** and **`intent?: "payment" | "setup"`** (see Plaid below).
+Optional props: `appearance` (**card/bank only** — fonts, rules, `themeVariables` including `--font-family`; also styles the parent-page **Plaid** panel), `defaultValues`, `onValidityChange`, `onEscapeKeyPressed`, card `onCardBrandChanged`, `billingAddressRequirement?: "country" | "full"` (`country` collects country/region and postal for CA / PR / GB / US; `full` is street address + Smarty autocomplete), card `additionalFields?: { cardholderName: boolean }`. Bank supports **`requireAchVerification?: boolean`** and **`intent?: "payment" | "setup"`** (see Plaid below).
 
 Do **not** create the intent in `useEffect` on mount/open.
 
 ### Vanilla
 
-Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic) **inside a host `<form>`**, then listen to that form’s `submit` (not only a button `click`). `validateForm({ iframe: card.iframe })` and `await confirmPayment({ iframe: card.iframe, token })` (or `confirmSetup`). Pass `defaultValues` / `onValidityChange` on mount; card: `onCardBrandChanged`. Bank: pass `requireAchVerification: true` when the payment requires Plaid, and `intent: "setup"` when saving. Use `controller.update({ defaultValues })`, `controller.focus(field)`, and `resetForm({ iframe: card.iframe })` without remounting.
+Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentMethodForm` (skeleton is automatic) **inside a host `<form>`**, then listen to that form’s `submit` (not only a button `click`). `validateForm({ iframe: card.iframe })` and `await confirmPayment({ iframe: card.iframe, token })` (or `confirmSetup`). Pass `defaultValues` / `onValidityChange` / `onEscapeKeyPressed` on mount; card: `onCardBrandChanged`. Bank: pass `requireAchVerification: true` when the payment requires Plaid, and `intent: "setup"` when saving. Use `controller.update({ defaultValues, appearance })`, `controller.focus(field)`, and `resetForm({ iframe: card.iframe })` without remounting.
 
 ## Populate and focus card/bank fields
 
@@ -267,19 +306,19 @@ type PaymentMethodFormDefaultValues = {
 - Focus: React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)`. Calls queue until the iframe is ready and no-op for hidden, wrong-form, or Plaid-covered fields.
 - Never use defaults for PAN, CVC, routing number, or account number.
 
-### Bank ACH / Plaid (Connect)
+### Bank ACH / Plaid (Embedded Institution Search)
 
-When ACH verification is required, the SDK **hides the routing/account iframe** and renders a **Connect bank account** button on the parent page. Clicking it asks the iframe to mint a Plaid Link token, then opens [Plaid Link](https://plaid.com/docs/link/web/). After success: linked bank + Disconnect; `onValidityChange({ isValid: true })`. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers or Plaid secrets.
+When ACH verification is required, the SDK **hides the routing/account iframe** and mounts [Plaid Embedded Institution Search](https://plaid.com/docs/link/embedded-institution-search/) (`Plaid.createEmbedded`) on the **parent** page. After success: linked bank + Disconnect; `onValidityChange({ isValid: true })`. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers, mint link tokens, or load Plaid yourself. Hosts do not proxy Pay API (`GET /merchants`, `POST /plaid_link_tokens`); the bank iframe does that.
 
 **`requireAchVerification`** (boolean, default `false`): for payment intents, set this from your own business rule when Plaid is required. The Pay API no longer exposes `Account.ach_threshold`.
 
-**`intent`** (`"payment"` | `"setup"`, default `"payment"`): `"setup"` always shows Connect. Changing `intent` remounts the bank iframe.
+**`intent`** (`"payment"` | `"setup"`, default `"payment"`): `"setup"` always shows Plaid. Changing `intent` remounts the bank iframe.
 
 | When | Behavior |
 |------|----------|
-| Render token `verification: false` | Always manual bank form (no Connect) |
-| `intent: "setup"` (verification on) | Always Connect / Plaid |
-| `intent: "payment"`, `requireAchVerification: true` | Connect / Plaid |
+| Render token `verification: false` | Always manual bank form (no Plaid) |
+| `intent: "setup"` (verification on) | Always Plaid Embedded Institution Search |
+| `intent: "payment"`, `requireAchVerification: true` | Plaid Embedded Institution Search |
 | `intent: "payment"`, omitted/false `requireAchVerification` | Manual bank form |
 
 Update `requireAchVerification` when the host rule changes. `resetForm` also disconnects Plaid.
@@ -288,7 +327,7 @@ Update `requireAchVerification` when the host rule changes. `resetForm` also dis
 
 **CSP:** parent page must allow `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Do not load `PLAID_SECRET` / `PLAID_CLIENT_ID` in the browser or iframe.
 
-`appearance.themeVariables` styles the Connect button the same way as the iframe (replace model; unset vars inherit from the host page).
+`appearance.themeVariables` styles the Plaid panel the same way as the iframe (unset vars inherit from the host page).
 
 ## Express flow (Google Pay / Apple Pay)
 
@@ -306,18 +345,18 @@ mount button → user taps → onConfirm → your server creates PI → return c
 - **`buttonProps`:** native button options. Google Pay omitted fields keep `buttonType: "plain"` and `buttonSizeMode: "fill"` (`buttonColor`, `buttonBorderType`, `buttonLocale`, `style`, …). Apple Pay omitted fields keep `buttonstyle: "black"`, `type: "plain"`, `locale: "en-US"` (`style.width` also sets `--apple-pay-button-width` unless you set that custom property).
 - **Host iframe:** React `iframeProps` (`style`, `className`, `id`). Vanilla `iframeClassName` / `iframeStyle`. Use CSS values with units (`{ borderRadius: "8px" }`).
 - **Removed (do not use):** `onInitiatePaymentIntentRequest` (use `onConfirm` and `return confirmPayment(token)`), `onResult`. `fullWidth` and top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle` belong in `buttonProps` (and `height` for painted height). Wallet card profiles send only `wallet_payload` — do not invent `wallet_provider` / PAN / cryptogram fields.
-- Apple Pay: Safari uses the native sheet; other browsers use Apple's QR popup. SDK shows a host-page waiting overlay with Cancel while the popup is open — do not reinvent expand/collapse iframe hacks.
+- Apple Pay: Safari uses the native sheet; other browsers use Apple's QR popup (`pay.apple.com`). SDK shows a host-page waiting overlay with **Cancel payment** while the popup is open. After authorize, Cancel is removed and the overlay shows **Completing your payment…** until `onConfirm` settles — do not reinvent expand/collapse iframe hacks or stack other fixed UI above the overlay.
 
 ## PCI rules (non-negotiable)
 
 - Never collect PAN, CVV, or full bank account numbers in merchant DOM.
 - Never put API keys or raw payment method confirm payloads on the client.
-- Merchant orchestrates tokens; Amos iframes + embed confirm endpoints handle sensitive data. Bank ACH verification uses Plaid Link on the **parent** page (SDK-owned Connect button) — still do not collect account numbers or Plaid client secrets yourself.
+- Merchant orchestrates tokens; Amos iframes + embed confirm endpoints handle sensitive data. Bank ACH verification uses Plaid Embedded Institution Search on the **parent** page (SDK-owned) — still do not collect account numbers or Plaid client secrets yourself.
 - `{ status: "succeeded" }` on a confirm result is **authorization UX**. Use **webhooks** (or server retrieve) before fulfilling or treating a PM as saved.
 
 ## Dashboard prerequisites (blank iframe checklist)
 
-1. Add **parent origin(s)** (exact scheme + host).
+1. Add **parent origin(s)** (exact scheme + host, or CSP-style `https://*.example.com`).
 2. Create a **render template** with allowed methods (and billing geography). Bank templates can **Disable verification** (`options.verification: false`) to skip Plaid.
 3. Issue a **render token**.
 4. Use an **API key** from the same environment.
@@ -330,7 +369,7 @@ Mismatch → blank iframe or method not allowed.
 |-------------------|-----|
 | Blank iframe | Origin/method not on render template; env mismatch |
 | Billing address rejected | Render template `billing_address_options` (`us_only` / `international`) |
-| `validateForm` always false | Iframe not ready; 5s timeout; wrong iframe ref; bank Plaid mode and customer has not Connected yet |
+| `validateForm` always false | Iframe not ready; 5s timeout; wrong iframe ref; bank Plaid mode and customer has not linked yet |
 | Confirm no-ops / always `failed` | Pass mounted `iframe` / `iframeRef`, not the container / React wrapper `div`; **await** the Promise |
 | Custom card/bank/wallet loading UI | SDK already shows a field skeleton (card/bank) or button skeleton (GPay/Apple Pay); don’t overlay or hide the mount |
 | Tab switch remounts / flashes skeleton | Keep all method forms mounted; hide inactive tabs with CSS (`hidden`) |
@@ -344,14 +383,18 @@ Mismatch → blank iframe or method not allowed.
 | Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
 | Enter in iframe does nothing | Wrap the mount in a host `<form>` and handle `submit` (`preventDefault`). Parent `keydown` cannot see keys in the cross-origin iframe. |
 | Inventing `onSubmitRequest` / host Enter listener | Do not add a callback or parent `keydown`. SDK submits the enclosing form (`FORM_SUBMIT_REQUEST`). Pay button `type="submit"`. Guard `processing` so Enter cannot double-submit. |
+| Escape in iframe does not close the modal | Pass `onEscapeKeyPressed`. Parent `keydown` cannot see Escape in the iframe. Not fired while a dropdown / address list is open, or while Plaid is showing. |
+| Custom font not applied | Pair `appearance.fonts` with `--font-family`. `https:` only. Self-hosted URLs must CORS-allow the embed origin. `fonts: []` skips the webfont. |
+| Styling iframe fields from the host page | Use `appearance.rules` (Stripe-style `.Input` / `.Label` / …). You cannot target the iframe DOM. Unknown selectors/properties are ignored. |
+| Putting `appearance` on the iframe URL | Appearance is postMessage after handshake. Canonical src params are `token`, `additionalFields`, `billingAddressRequirement`, `intent` only. |
 | Using `onCardBrandChanged` as BIN/PAN | Event is `{ brand }` only (or `null`); card form only — not bank |
 | **`Signature has expired`** | Create intent on submit/tap; confirm immediately |
 | Creating intent on mount/open | Move create into submit / `onConfirm` after `validateForm` |
 | GPay/Apple Pay `amount` types | Client prop: major-currency string `"50.00"`; Pay API / `paymentIntentCreateAttributes.amount`: number `5000` (cents). Passing `"5000"` to a wallet button charges $5,000. |
 | Setup bank still shows routing/account | Pass `intent: "setup"` |
-| Connect never appears (payment) | Pass `requireAchVerification: true`; ensure render-token `verification` is not false |
-| Inventing a Connect button / calling Plaid yourself | Use the bank mount; SDK shows Connect and opens Plaid Link |
-| CSP blocks Plaid / Connect click fails | Allow `cdn.plaid.com` + `*.plaid.com` on the **parent** page |
+| Plaid never appears (payment) | Pass `requireAchVerification: true`; ensure render-token `verification` is not false |
+| Inventing a Connect button / calling Plaid yourself | Use the bank mount; SDK shows Plaid Embedded Institution Search |
+| CSP blocks Plaid | Allow `cdn.plaid.com` + `*.plaid.com` on the **parent** page |
 | `onInitiatePaymentIntentRequest` / returning only a token | Breaking: `onConfirm` must `return confirmPayment(token)` |
 | `fullWidth` / top-level `buttonType` / `buttonStyle` | Breaking: use `height` + `buttonProps` + React `iframeProps` (vanilla `iframeStyle`) |
 | Inventing wallet PAN / `wallet_provider` | Embed confirm sends `card_profile_attributes.wallet_payload` only |
@@ -365,9 +408,9 @@ Mismatch → blank iframe or method not allowed.
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
+3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `succeeded` / `failed`; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, host-form Enter submit, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent`, and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.53`.
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, wallet **`onConfirm`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family`, `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search), and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.57`.
 
 ## Additional resources
 

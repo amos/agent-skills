@@ -10,10 +10,12 @@ Companion to [SKILL.md](SKILL.md).
 |--|---------|------------|
 | Dashboard | `https://dashboard-sandbox.amos.com` | `https://dashboard.amos.com` |
 | Pay API base URL | `https://api-sandbox.amos.com` | `https://api.amos.com` |
-| Embed | `https://embed-sandbox.amos.com` | `https://embed.amos.com` |
+| Embed | `https://js-sandbox.amos.com` | `https://js.amos.com` |
 | `X-Api-Version` | `1` (until the API bumps; SDK major often tracks this) | same |
 
-`@amos.com/node` (`>=0.1.53`, current 0.1.57): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
+
+`@amos.com/node` (`>=0.1.57`, current 0.1.58): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -170,12 +172,14 @@ Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos
 
 ### URLs (built by SDK)
 
+Canonical search params so the embed router does not 307. Appearance is **not** in the URL — it is applied after handshake via `UPDATE_APPEARANCE`. If `IFRAME_READY` never arrives, the SDK rewrites `src` once with `amosReload` (automatic; do not invent this).
+
 | Method | Path |
 |--------|------|
-| Card | `{embedOrigin}/iframe/card?token={renderToken}&additionalFields=…` |
-| Bank | `{embedOrigin}/iframe/bank?token={renderToken}` (`intent=setup` when saving) |
-| Google Pay | `{embedOrigin}/iframe/google-pay?token={renderToken}` (`allow="payment"`) |
-| Apple Pay | `{embedOrigin}/iframe/apple-pay?token={renderToken}` (`allow="payment"`) |
+| Card | `{embedOrigin}/iframe/card?token={renderToken}&additionalFields=…&billingAddressRequirement=…&intent=…` |
+| Bank | `{embedOrigin}/iframe/bank?token={renderToken}&additionalFields=&billingAddressRequirement=…&intent=…` (`intent=setup` when saving) |
+| Google Pay | `{embedOrigin}/iframe/google-pay?token={renderToken}&…` (`allow="payment"`) |
+| Apple Pay | `{embedOrigin}/iframe/apple-pay?token={renderToken}&…` (`allow="payment"`) |
 
 ### `@amos.com/amos-js`
 
@@ -185,7 +189,7 @@ Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos
 | `mountAmosBankAccountPaymentMethodForm` | Bank |
 | `mountAmosGooglePayButton` | GPay |
 | `mountAmosApplePayButton` | Apple Pay |
-| `validateForm({ iframe })` | `Promise<boolean>` (5s timeout → `false`; Plaid mode resolves immediately from Connect state) |
+| `validateForm({ iframe })` | `Promise<boolean>` (5s timeout → `false`; Plaid mode resolves immediately from linked state) |
 | `confirmPayment` / `confirmSetup` | Non-express confirm — `Promise<ConfirmPaymentResult>` / `Promise<ConfirmSetupResult>` (60s timeout → `failed`) |
 | `resetForm({ iframe })` | Clear fields/errors, restore mounted/updated defaults, and disconnect Plaid |
 | `updateDefaultValues` / `focusField` | Populate safe name/address defaults or focus a named field |
@@ -196,17 +200,19 @@ Required on every mount: **`renderToken`**.
 
 Wallet mounts require **`onConfirm({ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }) => Promise<ConfirmPaymentResult>`**. Create the intent, then `return confirmPayment(token)`. Do not use `onInitiatePaymentIntentRequest`.
 
-Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit. On bank, `isValid` is also true after Plaid Link returns credentials.
+Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit. On bank, `isValid` is also true after Plaid Embedded Institution Search returns credentials.
 
-Enter in a card/bank iframe field submits the **enclosing host `<form>`** (`requestSubmit()`), same as Stripe Elements. Payload is PCI-safe `{ type: "FORM_SUBMIT_REQUEST" }` (no field values). No-op without a host form, or while Plaid Connect is showing. Do not attach a parent `keydown` listener or invent `onSubmitRequest`.
+Optional on card/bank: **`onEscapeKeyPressed()`** — PCI-safe; close a host modal. Not fired while an iframe dropdown or address suggestion list is open, or while Plaid is showing. Do not attach a parent `keydown` for Escape.
+
+Enter in a card/bank iframe field submits the **enclosing host `<form>`** (`requestSubmit()`), same as Stripe Elements. Payload is PCI-safe `{ type: "FORM_SUBMIT_REQUEST" }` (no field values). No-op without a host form, or while Plaid Embedded Institution Search is showing. Do not attach a parent `keydown` listener or invent `onSubmitRequest`.
 
 Optional on **card only**: **`onCardBrandChanged({ brand })`** — PCI-safe (`CardBrand | null`). `brand` is `"visa"` | `"mastercard"` | `"amex"` | `"discover"` | `"diners"` | `"jcb"`, or `null` when empty / unknown. Does not include PAN, last4, or BIN. Never fired for bank.
 
-Bank form **`requireAchVerification?: boolean`** (default `false`) and **`intent?: "payment" | "setup"`** (default `"payment"`). For payments, `true` shows Connect / Plaid; for setup, Plaid is always used. Render-token `verification: false` disables verification in either case. When verification is required, the SDK hides the routing/account iframe and renders a parent-page **Connect bank account** button, then opens Plaid Link. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `plaid: { public_token, account_id }` (`PlaidCredentialsInput`) and omits `bank_account_profile_attributes`. **CSP:** `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Changing `intent` remounts the bank iframe.
+Bank form **`requireAchVerification?: boolean`** (default `false`) and **`intent?: "payment" | "setup"`** (default `"payment"`). For payments, `true` shows Plaid Embedded Institution Search; for setup, Plaid is always used. Render-token `verification: false` disables verification in either case. When verification is required, the SDK hides the routing/account iframe and mounts Plaid Embedded Institution Search (`Plaid.createEmbedded`) on the parent. Hosts do not proxy Pay API; the bank iframe mints link tokens. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `plaid: { public_token, account_id }` (`PlaidCredentialsInput`) and omits `bank_account_profile_attributes`. **CSP:** `script-src https://cdn.plaid.com` and `frame-src https://cdn.plaid.com https://*.plaid.com`. Changing `intent` remounts the bank iframe.
 
 Card and bank forms accept **`defaultValues`** for non-sensitive name and billing-address fields. React also exports `focusField({ iframeRef, field })`; vanilla controllers support `update({ defaultValues })` and `focus(field)`. Never populate PAN, CVC, routing number, or account number. Wrap card/bank mounts in a host `<form>` so Enter in the iframe submits checkout.
 
-Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) until appearance is ready (1.5s fallback), then fade the iframe in. Skeleton layout follows `appearance.labels`, `additionalFields`, and `billingAddressRequirement`. Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) until appearance is ready. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST`.
+Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) until appearance is ready (1.5s fallback), then fade the iframe in. Skeleton layout follows `appearance.labels`, `additionalFields`, `billingAddressRequirement`, and resting `.Input` / `.Label` rules (not webfonts). Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) until appearance is ready. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST` and calls `onEscapeKeyPressed` on `ESCAPE_KEY_PRESSED`.
 
 Do not set host `opacity` / `height` on the iframe to “fix” loading — that fights the reveal (`pointer-events: none` until shown).
 
@@ -225,7 +231,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 | `resetForm({ iframeRef })` | Clear fields/errors, restore defaults, and disconnect Plaid |
 | `focusField({ iframeRef, field })` | Focus a named card/bank field |
 
-No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.53` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `PaymentMethodFormDefaultValues`, and `PaymentMethodFormField`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`; card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.57` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
 
 All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
@@ -267,10 +273,49 @@ Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still u
 appearance?: {
   labels?: "above" | "floating" | "placeholder";
   themeVariables?: Partial<Record<ThemeVariable, string>>;
+  fonts?: FontSource[];
+  rules?: Partial<Record<AppearanceRuleSelector, AppearanceRuleDeclarations>>;
 }
+
+type FontSource =
+  | { cssSrc: string } // https: stylesheet with @font-face
+  | {
+      family: string;
+      src: string; // CSS src list of url("https://…")
+      display?: string; // default "swap"
+      style?: string;
+      weight?: string;
+      unicodeRange?: string;
+    };
 ```
 
-`themeVariables` is **replace**, not merge. **Card/bank only** — wallet buttons do not take `appearance`. On bank, the same variables style the parent-page **Connect bank account** button (unset vars inherit from the host page). Full `ThemeVariable` list is in the installed SDK README.
+**Card/bank only** — wallet buttons do not take `appearance`. Applied after handshake via `UPDATE_APPEARANCE` (not the iframe URL). On bank, `themeVariables` also style the parent-page Plaid panel (unset vars inherit from the host page). Full `ThemeVariable` list (including `--font-family`) is in the installed SDK README.
+
+**Merge vs replace** (mount helpers / React): `themeVariables` **merges** onto the last set (patch `--primary` without restating `--font-family`). `fonts`, `rules`, and `labels` **replace** when provided (`fonts: []` / `rules: {}` clears); omit to keep the previous value.
+
+**Fonts.** `https:` only, max 8. Omitted `fonts` + omitted `--font-family` on first paint → SDK sends Google Fonts Inter and `--font-family: Inter, ui-sans-serif, system-ui, sans-serif`. `fonts: []` without `--font-family` → `ui-sans-serif, system-ui, sans-serif`. Pair custom sources with `--font-family`. Iframe does not wait for webfonts. Self-hosted URLs must CORS-allow `js.amos.com` / `js-sandbox.amos.com`. Do not call `appearanceWithDefaults` yourself unless wiring `UPDATE_APPEARANCE` by hand (`initial: true` only on the first post after `IFRAME_READY`).
+
+The host skeleton copies `themeVariables` and resting **`.Input` / `.Label`** rules. It does not inject webfonts.
+
+**Rules.** Stripe-style class names mapped onto iframe slots — you cannot target the iframe DOM. They override `themeVariables` for the properties they set. `--input-height` / `--floating-input-height` are a minimum; `.Input` `padding` / `fontSize` / `lineHeight` can grow the field. Values may be `var(--token)` for an allowlisted theme variable (no fallback). Unknown selectors/properties are ignored. No `url()`, `@font-face`, `<`, `>`, or `\`.
+
+| Selector | Targets |
+| --- | --- |
+| `.Input` | Text fields, country select, state trigger |
+| `.Input:hover`, `.Input:focus`, `.Input:disabled` | Those controls in the given state |
+| `.Input--invalid` | Invalid text fields / selects |
+| `.Input::placeholder` | Input placeholders |
+| `.Label` | All labels (above, floating, radio option text, group titles) |
+| `.Label--floating` | Extra styles on floating labels (overrides `.Label`) |
+| `.Error` | Field-level error text |
+| `.Dropdown` | State list panel |
+| `.DropdownItem` | State list rows |
+| `.DropdownItem--highlight` | Highlighted state row |
+| `.RadioIcon` | Bank radio circle |
+| `.RadioIcon--checked` | Checked radio circle |
+| `.RadioIconInner` | Radio filled dot |
+
+Allowed declaration keys (camelCase): `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `lineHeight`, `letterSpacing`, `textTransform`, `color`, `backgroundColor`, `border`, `borderColor`, `borderWidth`, `borderStyle`, `borderRadius`, `boxShadow`, `outline`, `padding`, `margin`, `opacity`.
 
 Card/bank also accept `billingAddressRequirement?: "country" | "full"` (default `"country"`): `country` collects country/region and, for CA / PR / GB / US, a postal code; `full` is street address with Smarty autocomplete. Render templates restrict geography via `billing_address_options` (`mode: "us_only"` + `allowed_states`, or `mode: "international"` + `allowed_countries`).
 
@@ -288,7 +333,7 @@ Do not pass `"5000"` as the wallet button amount — it is major units, so that 
 
 Configure in the dashboard. Treat confirm results as UX; act on webhook delivery or server-side retrieve. Relevant events include `payment_intent.succeeded` and `setup_intent.succeeded` (plus cancelled / errored / requires_* variants).
 
-Bank ACH: when the render token enables verification and either `intent` is `"setup"` or payment `requireAchVerification` is true, the **client SDK** shows Connect / Plaid Link on the parent page. `verification: false` on the render template skips Plaid entirely. Confirm still goes through the bank iframe so Amos can attach `plaid` to the payment method. Do not collect Plaid credentials, routing numbers, or account numbers in merchant DOM.
+Bank ACH: when the render token enables verification and either `intent` is `"setup"` or payment `requireAchVerification` is true, the **client SDK** mounts Plaid Embedded Institution Search on the parent page. `verification: false` on the render template skips Plaid entirely. Confirm still goes through the bank iframe so Amos can attach `plaid` to the payment method. Do not collect Plaid credentials, routing numbers, or account numbers in merchant DOM.
 
 ## Internal map (Amos eng)
 
