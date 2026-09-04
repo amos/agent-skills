@@ -292,7 +292,7 @@ export function SaveCardForm({ renderToken }: { renderToken: string }) {
 
 ## React: bank payment intent (Plaid / ACH)
 
-For payment intents, pass `requireAchVerification` when your host-side rule requires **Plaid Embedded Institution Search**. For setup (save bank), pass `intent="setup"` — that always shows Plaid unless the render token disables verification.
+For payment intents, pass `requireAchVerification` when your host-side rule requires **Plaid Embedded Institution Search**. For setup (save bank), pass `intent="setup"` — that always shows Plaid unless the render token disables verification. The SDK shows a 350px pulse skeleton until Plaid’s `onLoad` — do not overlay a host loader.
 
 Parent pages that may hit Plaid need CSP: `script-src https://cdn.plaid.com` and `frame-src https://js.amos.com https://js-sandbox.amos.com https://cdn.plaid.com https://*.plaid.com`. Do not mint link tokens or load Plaid yourself.
 
@@ -532,6 +532,8 @@ mountAmosApplePayButton("#apple-pay", shared);
 ```
 
 ## Vanilla: bank (Plaid / ACH)
+
+The SDK shows a 350px pulse skeleton until Plaid’s `onLoad`. Do not overlay a host loader.
 
 ```ts
 import { mountAmosBankAccountPaymentMethodForm } from "@amos.com/amos-js";
