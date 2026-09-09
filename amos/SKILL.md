@@ -13,8 +13,9 @@ description: >-
   Plaid Embedded Institution Search / Plaid Link / ACH verification /
   requireAchVerification / intent, appearance fonts / rules / --font-family,
   onEscapeKeyPressed, isConfirmTimeout / confirm timeout, render token
-  verification, or debugging blank iframes / confirm failures / Signature has
-  expired.
+  verification, WalletCustomerCreateAttributes / WalletPostalAddress /
+  phoneRequired / shippingAddressRequired, or debugging blank iframes /
+  confirm failures / Signature has expired.
 ---
 
 # Amos (embed payment methods)
@@ -28,7 +29,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.17, `@amos.com/react-amos-js` 0.11.16, and `@amos.com/node` 0.1.58 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.21, `@amos.com/react-amos-js` 0.11.20, and `@amos.com/node` 0.1.59 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -341,10 +342,11 @@ Update `requireAchVerification` when the host rule changes. `resetForm` also dis
 mount button → user taps → onConfirm → your server creates PI → return confirmPayment(token)
 ```
 
-- Required: `amount` (**string** major-currency decimal, e.g. `"50.00"` for $50.00), `merchantName`, **`onConfirm`**. The iframe converts that string to cents in `paymentIntentCreateAttributes.amount` (`CreatePaymentIntentInput`) — forward those attributes to `POST /payment_intents` as-is.
+- Required: `amount` (**string** major-currency decimal, e.g. `"50.00"` for $50.00), `merchantName`, **`onConfirm`**. The iframe converts that string to cents in `paymentIntentCreateAttributes.amount` (`CreatePaymentIntentInput`) — forward those attributes to `POST /payment_intents` as `{ payment_intent }` as-is.
 - **`onConfirm({ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment })`**: create the intent on your server, then **`return confirmPayment(token)`** (`Promise<ConfirmPaymentResult>`). The SDK does **not** auto-confirm.
+- `customerCreateAttributes` is **`WalletCustomerCreateAttributes`** (re-exported from both client SDKs), **not** Amos `CreateCustomerInput`. Map it on the server. Nested `billingAddress` / `shippingAddress` use Amos billing names (`address_line1`, `state`, `postal_code`). Do not read top-level `line1` / `region` / `postalCode`. `phone` and `shippingAddress` are omitted unless you opted in.
+- Name, email, and billing address are **always** collected. **`phoneRequired` / `shippingAddressRequired`** are top-level mount options (not `buttonProps`), default **`false`**. Pass `phoneRequired: true` to collect a phone (Apple Pay previously always did). Pass `shippingAddressRequired: true` to collect shipping.
 - Do **not** call `validateForm` or `confirmPayment({ iframe })` yourself from the host — use the `confirmPayment` function injected into `onConfirm`.
-- Map iframe create attributes onto Pay API bodies (`payment_intent`, `customer`) on the server.
 - Components: `AmosGooglePayButton` / `AmosApplePayButton` (React) or `mountAmosGooglePayButton` / `mountAmosApplePayButton` (vanilla).
 - Wallet buttons do **not** take `appearance`. They show a **button-shaped skeleton** at `height` until the iframe is ready — do not overlay a host placeholder.
 - **Layout:** the branded button fills the iframe. `height` is a CSS length (default `"48px"`). Size the **mount slot** (container width), not the button. Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "240px" } }`.
@@ -404,6 +406,9 @@ Mismatch → blank iframe or method not allowed.
 | Inventing a Connect button / calling Plaid yourself | Use the bank mount; SDK shows Plaid Embedded Institution Search with its own 350px skeleton |
 | CSP blocks Plaid | Allow `cdn.plaid.com` + `*.plaid.com` on the **parent** page |
 | `onInitiatePaymentIntentRequest` / returning only a token | Breaking: `onConfirm` must `return confirmPayment(token)` |
+| Typing wallet `customerCreateAttributes` as `CreateCustomerInput` | Use `WalletCustomerCreateAttributes`. Map nested `billingAddress` (`address_line1` / `state` / `postal_code`) on the server. |
+| Wallet `line1` / `region` / `postalCode` | Removed. Read `billingAddress` only. Card/bank `defaultValues.billingAddress.line1` is a different contract. |
+| Apple Pay no longer collecting phone | Pass top-level `phoneRequired: true`. Omitted defaults to `false`. Do not put it in `buttonProps`. |
 | `fullWidth` / top-level `buttonType` / `buttonStyle` | Breaking: use `height` + `buttonProps` + React `iframeProps` (vanilla `iframeStyle`) |
 | Inventing wallet PAN / `wallet_provider` | Embed confirm sends `card_profile_attributes.wallet_payload` only |
 | Importing `PaymentIntent` from amos-js | Use `components` from `@amos.com/node` |
@@ -416,9 +421,9 @@ Mismatch → blank iframe or method not allowed.
 
 1. Confirm browser stack, **payment vs setup**, methods (including Apple Pay if needed), and **server language / SDK**.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
-3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** that creates the intent then **`return confirmPayment(token)`**. Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
+3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** typed with **`WalletCustomerCreateAttributes`** that creates the intent then **`return confirmPayment(token)`**. Pass top-level **`phoneRequired`** / **`shippingAddressRequired`** when needed (default `false`). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `succeeded` / `failed` / **`isConfirmTimeout`**; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps`. Peer `@amos.com/node` `>=0.1.57`.
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`** + **`WalletCustomerCreateAttributes`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps` / **`phoneRequired`** / **`shippingAddressRequired`**. Peer `@amos.com/node` `>=0.1.57`.
 
 ## Additional resources
 

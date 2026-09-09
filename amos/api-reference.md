@@ -15,7 +15,7 @@ Companion to [SKILL.md](SKILL.md).
 
 Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
 
-`@amos.com/node` (`>=0.1.57`, current 0.1.58): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+`@amos.com/node` (`>=0.1.57`, current 0.1.59): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -104,7 +104,7 @@ POST {baseUrl}/customers
 }
 ```
 
-**201** → `Customer` (includes `id`). Pass `id` as `customer_id` on the intent when associating. Optional `mailing_address_attributes` (`MailingAddressInput`: line1/2, city, country, postal_code, state, name). Wallet `onConfirm` receives the nested `CreateCustomerInput` / `CreatePaymentIntentInput` — wrap them as `{ customer }` / `{ payment_intent }` on the Pay API.
+**201** → `Customer` (includes `id`). Pass `id` as `customer_id` on the intent when associating. Optional `mailing_address_attributes` (`MailingAddressInput`: line1/2, city, country, postal_code, state, name). Wallet `onConfirm` receives `WalletCustomerCreateAttributes` (not `CreateCustomerInput`) plus `CreatePaymentIntentInput`. Forward the payment-intent attributes as `{ payment_intent }`. Map nested `billingAddress` (`address_line1`, `state`, `postal_code`) on the server — do not wrap the wallet snapshot as `{ customer }` unchanged.
 
 ### Retrieve after confirm
 
@@ -198,7 +198,7 @@ Canonical search params so the embed router does not 307. Appearance is **not** 
 
 Required on every mount: **`renderToken`**.
 
-Wallet mounts require **`onConfirm({ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }) => Promise<ConfirmPaymentResult>`**. Create the intent, then `return confirmPayment(token)`. Do not use `onInitiatePaymentIntentRequest`.
+Wallet mounts require **`onConfirm({ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }) => Promise<ConfirmPaymentResult>`**. `customerCreateAttributes` is **`WalletCustomerCreateAttributes`**, not `CreateCustomerInput`. Create the intent, then `return confirmPayment(token)`. Optional top-level **`phoneRequired`** / **`shippingAddressRequired`** (default `false`, not `buttonProps`). Do not use `onInitiatePaymentIntentRequest`.
 
 Optional on card/bank: **`onValidityChange({ isValid })`** — PCI-safe; enable/disable the host button. Still `validateForm` on submit. On bank, `isValid` is also true after Plaid Embedded Institution Search returns credentials.
 
@@ -231,7 +231,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 | `resetForm({ iframeRef })` | Clear fields/errors, restore defaults, and disconnect Plaid |
 | `focusField({ iframeRef, field })` | Focus a named card/bank field |
 
-No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.57` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `isConfirmTimeout`, `CONFIRM_TIMEOUT_MS`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.57` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `isConfirmTimeout`, `CONFIRM_TIMEOUT_MS`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `WalletCustomerCreateAttributes`, `WalletPostalAddress`, `WalletContactRequirements`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
 
 All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
@@ -263,7 +263,9 @@ Wallet buttons do **not** take `appearance`. The branded button fills the iframe
 | `buttonProps` | Top-level object | Native GPay `ButtonOptions` / `<apple-pay-button>` attrs + inner `style`. Omitted GPay fields: `plain` / `fill`. Omitted Apple fields: `black` / `plain` / `en-US`. |
 | `iframeProps` | React | Host `<iframe>` (`style`, `className`, `id`). CSS lengths need units. |
 | `iframeClassName` / `iframeStyle` | Vanilla | Same host-iframe chrome. |
-| `onConfirm` | Required | `{ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }` → create PI → `return confirmPayment(token)`. |
+| `onConfirm` | Required | `{ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }` → create PI → `return confirmPayment(token)`. `customerCreateAttributes` is `WalletCustomerCreateAttributes`. |
+| `phoneRequired` | Top-level | Collect phone in the sheet. Default `false`. Not `buttonProps`. |
+| `shippingAddressRequired` | Top-level | Collect shipping postal address. Default `false`. Name, email, and billing are always required. |
 
 Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "240px" } }`.
 

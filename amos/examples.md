@@ -344,9 +344,9 @@ export function BankPaymentForm({ renderToken }: { renderToken: string }) {
 
 ## React: Google Pay / Apple Pay (express)
 
-Wallet button `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), not cents. The iframe converts it to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to your Pay API create call as-is.
+Wallet button `amount` is a **major-currency decimal string** (`"50.00"` for $50.00), not cents. The iframe converts it to cents in `paymentIntentCreateAttributes.amount` — forward those attributes to your Pay API create call as `{ payment_intent }` as-is.
 
-Create the intent inside **`onConfirm`**, then **`return confirmPayment(token)`**. The SDK does not auto-confirm.
+Create the intent inside **`onConfirm`**, then **`return confirmPayment(token)`**. The SDK does not auto-confirm. Type `customerCreateAttributes` as **`WalletCustomerCreateAttributes`**, not `CreateCustomerInput`. Map nested `billingAddress` (`address_line1` / `state` / `postal_code`) on the server. Name, email, and billing are always collected; pass top-level `phoneRequired` / `shippingAddressRequired` (default `false`) when you need phone or shipping. Do not put those flags in `buttonProps`.
 
 ```tsx
 import { useState } from "react";
@@ -355,6 +355,7 @@ import {
   AmosApplePayButton,
   isConfirmTimeout,
   type ConfirmPaymentResult,
+  type WalletCustomerCreateAttributes,
 } from "@amos.com/react-amos-js";
 import type { components } from "@amos.com/node";
 
@@ -367,7 +368,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
     confirmPayment,
   }: {
     paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
-    customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
+    customerCreateAttributes: WalletCustomerCreateAttributes;
     confirmPayment: (token: string) => Promise<ConfirmPaymentResult>;
   }): Promise<ConfirmPaymentResult> {
     try {
@@ -375,6 +376,8 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // Map WalletCustomerCreateAttributes on the server — it is not
+          // CreateCustomerInput.
           paymentIntent: paymentIntentCreateAttributes,
           customer: customerCreateAttributes,
         }),
@@ -400,6 +403,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="50.00"
         merchantName="Example Store"
+        phoneRequired
         buttonProps={{ buttonType: "pay" }}
         iframeProps={{ style: { borderRadius: "8px" } }}
         onConfirm={handleConfirm}
@@ -408,6 +412,7 @@ export function ExpressButtons({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         amount="50.00"
         merchantName="Example Store"
+        phoneRequired
         buttonProps={{ buttonstyle: "black", type: "buy" }}
         iframeProps={{ style: { borderRadius: "8px" } }}
         onConfirm={handleConfirm}
@@ -498,6 +503,7 @@ import {
   mountAmosApplePayButton,
   mountAmosGooglePayButton,
   type ConfirmPaymentResult,
+  type WalletCustomerCreateAttributes,
 } from "@amos.com/amos-js";
 import type { components } from "@amos.com/node";
 
@@ -505,19 +511,22 @@ const shared = {
   renderToken: RENDER_TOKEN,
   amount: "50.00",
   merchantName: "Example Store",
+  phoneRequired: true,
   onConfirm: async ({
     paymentIntentCreateAttributes,
     customerCreateAttributes,
     confirmPayment,
   }: {
     paymentIntentCreateAttributes: components["schemas"]["CreatePaymentIntentInput"];
-    customerCreateAttributes: components["schemas"]["CreateCustomerInput"];
+    customerCreateAttributes: WalletCustomerCreateAttributes;
     confirmPayment: (token: string) => Promise<ConfirmPaymentResult>;
   }): Promise<ConfirmPaymentResult> => {
     const response = await fetch("/api/payment-intents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        // Map WalletCustomerCreateAttributes on the server — it is not
+        // CreateCustomerInput.
         customer: customerCreateAttributes,
         paymentIntent: paymentIntentCreateAttributes,
       }),
