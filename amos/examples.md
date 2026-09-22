@@ -49,7 +49,7 @@ Content-Type: application/json
 }
 ```
 
-Same `EmbedToken` response; browser confirms with `await confirmSetup`.
+Same `EmbedToken` response; browser confirms with `await confirmSetup`. Setup intents are organization-scoped (`X-Account-Id` ignored). The JWT carries `organization_id` + `setup_intent_id`.
 
 ### Customer (optional)
 

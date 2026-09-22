@@ -15,7 +15,7 @@ Companion to [SKILL.md](SKILL.md).
 
 Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
 
-`@amos.com/node` (`>=0.1.57`, current 0.1.59): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+`@amos.com/node` (`>=0.1.57`, current 0.1.61): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -85,7 +85,9 @@ POST {baseUrl}/setup_intents
 }
 ```
 
-**200** → `EmbedToken` (same shape). Browser uses `confirmSetup`.
+Setup intents are **organization-scoped**. `X-Account-Id` is ignored if sent; the customer must belong to the authenticated organization. The embed JWT payload includes `organization_id` and `setup_intent_id` (`account_id` is null). Payment-intent tokens remain account-scoped.
+
+**200** → `EmbedToken` (same shape). Browser uses `confirmSetup` (SDK reads `setup_intent_id` from the JWT).
 
 ### Create customer
 

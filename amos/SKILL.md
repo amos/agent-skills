@@ -29,7 +29,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.21, `@amos.com/react-amos-js` 0.11.20, and `@amos.com/node` 0.1.59 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.21, `@amos.com/react-amos-js` 0.11.20, and `@amos.com/node` 0.1.61 (peer `>=0.1.57`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -67,6 +67,15 @@ OpenAPI schema types (`PaymentIntent`, `EmbedToken`, `CreatePaymentIntentInput`,
 | **Embed token** | From `POST /payment_intents` or `/setup_intents` | Server → browser only for confirm | `Authorization: Embed …` on confirm |
 
 Render token loads the form. Embed token authorizes **one confirm**. Create response is `EmbedToken { token, ttl }` — `ttl` typically ~3600s. After that: `{"errors":{"base":["Signature has expired"]}}`.
+
+Decoded embed JWT (`EmbedTokenJwt`):
+
+| Intent | Claims present | Null / unused |
+|--------|----------------|---------------|
+| Payment | `account_id`, `payment_intent_id` | `organization_id`, `setup_intent_id` |
+| Setup | `organization_id`, `setup_intent_id` | `account_id`, `payment_intent_id` |
+
+`confirmPayment` reads `payment_intent_id`. `confirmSetup` reads `setup_intent_id`. Do not require `account_id` on a setup token.
 
 ## Intent timing (required pattern)
 
@@ -315,7 +324,7 @@ type PaymentMethodFormDefaultValues = {
 
 ### Bank ACH / Plaid (Embedded Institution Search)
 
-When ACH verification is required, the SDK **hides the routing/account iframe** and mounts [Plaid Embedded Institution Search](https://plaid.com/docs/link/embedded-institution-search/) (`Plaid.createEmbedded`) on the **parent** page. A **350px pulse skeleton** covers the slot until Plaid’s `onLoad` (1.5s fallback) — do not overlay a host loader or mint the `link_token` yourself. After success: linked bank + Disconnect; `onValidityChange({ isValid: true })`. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers, mint link tokens, or load Plaid yourself. Hosts do not proxy Pay API (`GET /merchants`, `POST /plaid_link_tokens`); the bank iframe does that.
+When ACH verification is required, the SDK **hides the routing/account iframe** and mounts [Plaid Embedded Institution Search](https://plaid.com/docs/link/embedded-institution-search/) (`Plaid.createEmbedded`) on the **parent** page. A **350px pulse skeleton** covers the slot until Plaid’s `onLoad` (1.5s fallback) — do not overlay a host loader or mint the `link_token` yourself. After success, that slot is a connected-account row: institution name, masked account (`****` plus last4, or "Connected"), and an outline Disconnect button. Disconnect clears the linked account and shows Institution Search again. `onValidityChange({ isValid: true })` fires when the account is linked. The row uses existing `appearance.themeVariables` (`--border`, `--background`, `--foreground`, `--muted` falling back to `--accent`, `--muted-foreground`, `--accent`, `--accent-foreground`, `--radius`, `--ring`). In dark mode the Disconnect border uses `--input`. Do not add a theme variable, appearance rule, or custom Disconnect control. Confirm still uses `validateForm` / `confirmPayment` / `confirmSetup` — the SDK attaches `payment_method.plaid` (`public_token`, `account_id`) and omits `bank_account_profile_attributes`. Do not collect routing/account numbers, mint link tokens, or load Plaid yourself. Hosts do not proxy Pay API (`GET /merchants`, `POST /plaid_link_tokens`); the bank iframe (embed) does that. Embed does not render the connected row.
 
 **`requireAchVerification`** (boolean, default `false`): for payment intents, set this from your own business rule when Plaid is required. Optional helper: `requiresAchVerification({ amount, achThreshold })` (integer cents). The Pay API no longer exposes `Account.ach_threshold` — hosts that still have a threshold compute this themselves.
 
@@ -404,6 +413,7 @@ Mismatch → blank iframe or method not allowed.
 | Setup bank still shows routing/account | Pass `intent: "setup"` |
 | Plaid never appears (payment) | Pass `requireAchVerification: true`; ensure render-token `verification` is not false |
 | Inventing a Connect button / calling Plaid yourself | Use the bank mount; SDK shows Plaid Embedded Institution Search with its own 350px skeleton |
+| Restyling Disconnect as a text link, or looking for that row in embed | The parent SDK draws the connected-account row (name, mask, outline Disconnect). Embed only mints the link token. Use existing `themeVariables`; do not add a rule selector |
 | CSP blocks Plaid | Allow `cdn.plaid.com` + `*.plaid.com` on the **parent** page |
 | `onInitiatePaymentIntentRequest` / returning only a token | Breaking: `onConfirm` must `return confirmPayment(token)` |
 | Typing wallet `customerCreateAttributes` as `CreateCustomerInput` | Use `WalletCustomerCreateAttributes`. Map nested `billingAddress` (`address_line1` / `state` / `postal_code`) on the server. |
@@ -423,7 +433,7 @@ Mismatch → blank iframe or method not allowed.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
 3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** typed with **`WalletCustomerCreateAttributes`** that creates the intent then **`return confirmPayment(token)`**. Pass top-level **`phoneRequired`** / **`shippingAddressRequired`** when needed (default `false`). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `succeeded` / `failed` / **`isConfirmTimeout`**; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`** + **`WalletCustomerCreateAttributes`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps` / **`phoneRequired`** / **`shippingAddressRequired`**. Peer `@amos.com/node` `>=0.1.57`.
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`** + **`WalletCustomerCreateAttributes`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps` / **`phoneRequired`** / **`shippingAddressRequired`**. Peer `@amos.com/node` `>=0.1.57` (current 0.1.61).
 
 ## Additional resources
 
