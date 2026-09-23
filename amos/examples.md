@@ -212,6 +212,10 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         onCardBrandChanged={({ brand }) => {
           // "visa" | "mastercard" | "amex" | "discover" | "diners" | "jcb" | null
         }}
+        onPostalCodeChange={({ postalCode, country }) => {
+          // Finished code, or null when a finished code becomes incomplete.
+          // Not called for incomplete keystrokes or defaultValues.
+        }}
       />
       <button type="button" onClick={() => focusField({ iframeRef, field: "cardNumber" })}>
         Edit card
@@ -476,6 +480,10 @@ const card = mountAmosCreditCardPaymentMethodForm("#card-form", {
   },
   onCardBrandChanged: ({ brand }) => {
     // "visa" | "mastercard" | "amex" | "discover" | "diners" | "jcb" | null
+  },
+  onPostalCodeChange: ({ postalCode, country }) => {
+    // Finished code, or null when a finished code becomes incomplete.
+    // Not called for incomplete keystrokes or defaultValues. Bank forms too.
   },
 });
 
