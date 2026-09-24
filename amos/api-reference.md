@@ -15,7 +15,7 @@ Companion to [SKILL.md](SKILL.md).
 
 Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
 
-`@amos.com/node` (`>=0.1.65`, current 0.1.65): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+`@amos.com/node` (`>=0.1.65`, current 0.1.66): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -216,7 +216,7 @@ Bank form **`requireAchVerification?: boolean`** (default `false`) and **`intent
 
 Card and bank forms accept **`defaultValues`** for non-sensitive name and billing-address fields. React also exports `focusField({ iframeRef, field })`; vanilla controllers support `update({ defaultValues })` and `focus(field)`. Never populate PAN, CVC, routing number, or account number. Wrap card/bank mounts in a host `<form>` so Enter in the iframe submits checkout.
 
-Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) until appearance is ready (1.5s fallback), then fade the iframe in. Skeleton layout follows `appearance.labels`, `additionalFields`, `billingAddressRequirement`, and resting `.Input` / `.Label` rules (not webfonts). When Plaid Embedded Institution Search is showing, a **350px pulse skeleton** covers that slot until Plaid’s `onLoad` (same 1.5s fallback). Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) until appearance is ready. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST` and calls `onEscapeKeyPressed` on `ESCAPE_KEY_PRESSED`.
+Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) while the iframe stays `opacity: 0` at its default pixel height until appearance is applied, or for 1.5s after mount if appearance never acks. The SDK then sets `opacity: 1` with no height animation on that first paint. Skeleton layout follows `appearance.labels`, `additionalFields`, `billingAddressRequirement`, and resting `.Input` / `.Label` rules (not webfonts). When Plaid Embedded Institution Search is showing, a **350px pulse skeleton** covers that slot until Plaid’s `onLoad` (same 1.5s fallback). Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) on the same reveal clock. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST` and calls `onEscapeKeyPressed` on `ESCAPE_KEY_PRESSED`.
 
 Do not set host `opacity` / `height` on the iframe to “fix” loading — that fights the reveal (`pointer-events: none` until shown).
 
@@ -275,7 +275,7 @@ Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "2
 
 **Removed:** `onResult`, `ConfirmationResult`, `confirmPaymentIntent` / `confirmSetupIntent`, `onInitiatePaymentIntentRequest`, `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`.
 
-Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. A button-shaped skeleton is shown immediately at `height` and replaced when appearance is ready.
+Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. A button-shaped skeleton is shown immediately at `height`. The iframe stays `opacity: 0` at its default pixel height until appearance is applied, or for 1.5s after mount if appearance never acks.
 
 ## Appearance
 
