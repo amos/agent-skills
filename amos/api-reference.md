@@ -15,7 +15,7 @@ Companion to [SKILL.md](SKILL.md).
 
 Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
 
-`@amos.com/node` (`>=0.1.65`, current 0.1.66): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+`@amos.com/node` (`>=0.1.65`, current 0.1.69): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -168,7 +168,7 @@ Partners do **not** call these for standard iframe flows. The embed app does.
 - `POST /embed/payment_intents/{id}/confirm_with_payment_method`
 - `POST /embed/setup_intents/{id}/confirm_with_payment_method`
 
-Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos infrastructure. Bank confirm: send `plaid` and omit `bank_account_profile_attributes` when verification is required; otherwise send encrypted account + routing. Wallet confirm: `card_profile_attributes.wallet_payload` only (no client `wallet_provider` / PAN / cryptogram).
+Auth: `Authorization: Embed <embedToken>`. Payment method material stays in Amos infrastructure. Bank confirm: send `plaid` and omit `bank_account_profile_attributes` when verification is required (routing and account numbers are filled server-side from Plaid Auth); otherwise send `routing_number` and `account_number` on `bank_account_profile_attributes`. Wallet confirm: `card_profile_attributes.wallet_payload` only (no client `wallet_provider` / PAN / cryptogram).
 
 ## Client iframe SDKs
 
@@ -299,7 +299,7 @@ type FontSource =
     };
 ```
 
-**Card/bank only** — wallet buttons do not take `appearance`. Applied after handshake via `UPDATE_APPEARANCE` (not the iframe URL). On bank, `themeVariables` also style the parent-page Plaid panel (unset vars inherit from the host page). Full `ThemeVariable` list (including `--font-family`) is in the installed SDK README.
+**Card/bank only** — wallet buttons do not take `appearance`. Applied after handshake via `UPDATE_APPEARANCE` (not the iframe URL). On bank, `themeVariables` also style the parent-page Plaid panel (unset vars inherit from the host page). Full `ThemeVariable` list (including `--font-family`, `--floating-value-padding-top`, and `--floating-value-padding-bottom`) is in the installed SDK README.
 
 **Replace model** (iframe + mount / React `update`): including `themeVariables` / `fonts` / `rules` sets the full override; omit to keep the previous value. `fonts: []` / `rules: {}` clears. Unlisted `themeVariables` revert to iframe defaults. A `themeVariables` payload that omits `--font-family` still gets Inter filled in (`appearanceWithDefaults`); `fonts: []` on that payload uses the system stack instead. Do not call `appearanceWithDefaults` yourself unless wiring `UPDATE_APPEARANCE` by hand (`initial: true` only on the first post after `IFRAME_READY`; `{ initial }` is required).
 
@@ -307,7 +307,7 @@ type FontSource =
 
 The host skeleton copies `themeVariables` and resting **`.Input` / `.Label`** rules. It does not inject webfonts.
 
-**Rules.** Stripe-style class names mapped onto iframe slots — you cannot target the iframe DOM. They override `themeVariables` for the properties they set. `--input-height` / `--floating-input-height` are a minimum; `.Input` `padding` / `fontSize` / `lineHeight` can grow the field. Values may be `var(--token)` for an allowlisted theme variable (no fallback). Unknown selectors/properties are ignored. No `url()`, `@font-face`, `<`, `>`, or `\`.
+**Rules.** Stripe-style class names mapped onto iframe slots — you cannot target the iframe DOM. They override `themeVariables` for the properties they set. `--input-height` / `--floating-input-height` are a minimum; `.Input` `padding` / `fontSize` / `lineHeight` can grow the field. Floated input text padding is `--floating-value-padding-top` and `--floating-value-padding-bottom`. Values may be `var(--token)` for an allowlisted theme variable (no fallback). Unknown selectors/properties are ignored. No `url()`, `@font-face`, `<`, `>`, or `\`.
 
 | Selector | Targets |
 | --- | --- |
