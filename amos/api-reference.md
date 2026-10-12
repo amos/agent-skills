@@ -15,7 +15,7 @@ Companion to [SKILL.md](SKILL.md).
 
 Parent CSP: `frame-src https://js.amos.com https://js-sandbox.amos.com` (plus `Permissions-Policy payment=` for those origins). Older SDKs still use `embed.amos.com` / `embed-sandbox.amos.com`. Dashboard allowed origins may be concrete or CSP-style `https://*.example.com`.
 
-`@amos.com/node` (`>=0.1.65`, current 0.1.69): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
+`@amos.com/node` (`>=0.1.65`, current 0.1.72): `AMOS_API_BASE_URL_SANDBOX`, `AMOS_API_BASE_URL_PRODUCTION`, `AMOS_API_VERSION`. Requires **Node 22+**. Old names `PAY_API_*` and hosts `pay.amos.com` / `pay-sandbox.amos.com` are gone from the SDK. OpenAPI `servers` may still list `pay-sandbox.amos.com` — use the Node constants.
 
 ## Auth (merchant server → Pay API)
 
@@ -216,9 +216,9 @@ Bank form **`requireAchVerification?: boolean`** (default `false`) and **`intent
 
 Card and bank forms accept **`defaultValues`** for non-sensitive name and billing-address fields. React also exports `focusField({ iframeRef, field })`; vanilla controllers support `update({ defaultValues })` and `focus(field)`. Never populate PAN, CVC, routing number, or account number. Wrap card/bank mounts in a host `<form>` so Enter in the iframe submits checkout.
 
-Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) while the iframe stays `opacity: 0` at its default pixel height until appearance is applied, or for 1.5s after mount if appearance never acks. The SDK then sets `opacity: 1` with no height animation on that first paint. Skeleton layout follows `appearance.labels`, `additionalFields`, `billingAddressRequirement`, and resting `.Input` / `.Label` rules (not webfonts). When Plaid Embedded Institution Search is showing, a **350px pulse skeleton** covers that slot until Plaid’s `onLoad` (same 1.5s fallback). Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) on the same reveal clock. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST` and calls `onEscapeKeyPressed` on `ESCAPE_KEY_PRESSED`.
+Card/bank **`mount*` helpers** show a host-page field skeleton (`aria-hidden`) while the iframe stays at opacity 1 with an explicit pixel width and height, and is inert, until appearance is applied, or for 1.5s after mount if appearance never acks. `@amos.com/amos-js` 0.11.30 sets `sandbox` before `src`. Card and bank frames use `PAYMENT_IFRAME_SANDBOX` (`allow-forms allow-same-origin allow-scripts`). Wallet frames use `WALLET_IFRAME_SANDBOX` (those flags plus `allow-popups allow-popups-to-escape-sandbox`) and `allow="payment"`. Copy that attribute onto a hand-built iframe before `src`. Skeleton layout follows `appearance.labels`, `additionalFields`, `billingAddressRequirement`, and resting `.Input` / `.Label` rules (not webfonts). When Plaid Embedded Institution Search is showing, a **350px pulse skeleton** covers that slot until Plaid’s `onLoad` (same 1.5s fallback). Google Pay / Apple Pay **`mount*` helpers** show a **button-shaped** skeleton at `height` (default `"48px"`) on the same reveal clock. `destroy()` removes the skeleton wrapper. Lower-level `attachPaymentMethodFormListeners` / `attach*PayButtonListeners` do **not** include the skeleton — only the mount helpers (and React components, which call them) do. `attachPaymentMethodFormListeners` also submits the enclosing host form on `FORM_SUBMIT_REQUEST` and calls `onEscapeKeyPressed` on `ESCAPE_KEY_PRESSED`.
 
-Do not set host `opacity` / `height` on the iframe to “fix” loading — that fights the reveal (`pointer-events: none` until shown).
+Do not set host `opacity`, `width`, `height`, or `sandbox` on the iframe to “fix” loading — the SDK keeps a definite pixel box at opacity 1 (`pointer-events: none` until shown).
 
 Method tabs: mount every card/bank (and express) form you offer and hide inactive panels with CSS (`hidden`). Do not conditionally unmount on tab change — that reloads the iframe and re-shows the skeleton.
 
@@ -235,7 +235,7 @@ Method tabs: mount every card/bank (and express) form you offer and hide inactiv
 | `resetForm({ iframeRef })` | Clear fields/errors, restore defaults, and disconnect Plaid |
 | `focusField({ iframeRef, field })` | Focus a named card/bank field |
 
-No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.65` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `isConfirmTimeout`, `CONFIRM_TIMEOUT_MS`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `WalletCustomerCreateAttributes`, `WalletPostalAddress`, `WalletContactRequirements`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `PaymentMethodFormPostalCodeChangeEvent`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, `onPostalCodeChange`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
+No Provider. `@amos.com/node` is a **peer dependency** `>=0.1.65` (install for OpenAPI types). Re-exports amos-js helpers/types including `resetForm`, `focusField`, `isConfirmTimeout`, `CONFIRM_TIMEOUT_MS`, `PAYMENT_IFRAME_SANDBOX`, `WALLET_IFRAME_SANDBOX`, `ConfirmPaymentResult`, `ConfirmSetupResult`, `WalletCustomerCreateAttributes`, `WalletPostalAddress`, `WalletContactRequirements`, `PaymentMethodFormDefaultValues`, `PaymentMethodFormField`, `PaymentMethodFormPostalCodeChangeEvent`, `FontSource`, `AppearanceRuleSelector`, and `AppearanceRuleDeclarations`. Schema types: `components` from `@amos.com/node`. `AmosBankAccountPaymentMethodForm` accepts **`requireAchVerification`** and **`intent`**. Card/bank forms accept `defaultValues`, `onEscapeKeyPressed`, `onPostalCodeChange`, and `appearance` (`fonts`, `rules`, `--font-family`); card accepts `onCardBrandChanged`. Wrap card/bank components in a host `<form onSubmit>` so Enter in the iframe submits checkout.
 
 All messaging helpers (`validateForm`, `confirmPayment`, `confirmSetup`, `resetForm`) accept the mounted iframe — React: same `iframeRef` as the form `ref`; vanilla: `controller.iframe`. React card/bank components render a wrapper `div` and mount into it; `ref` / `style` / `className` still target the **iframe**. Wallet buttons take **`iframeProps`** for host-iframe chrome (not top-level `style`).
 
@@ -265,7 +265,7 @@ Wallet buttons do **not** take `appearance`. The branded button fills the iframe
 |------|--------|------|
 | `height` | Top-level | CSS length, default `"48px"`. Apple ignores CSS `height`; Amos maps it. |
 | `buttonProps` | Top-level object | Native GPay `ButtonOptions` / `<apple-pay-button>` attrs + inner `style`. Omitted GPay fields: `plain` / `fill`. Omitted Apple fields: `black` / `plain` / `en-US`. |
-| `iframeProps` | React | Host `<iframe>` (`style`, `className`, `id`). CSS lengths need units. |
+| `iframeProps` | React | Host `<iframe>` (`style`, `className`, `id`). CSS lengths need units. Do not pass `sandbox`, `width`, or `height`. |
 | `iframeClassName` / `iframeStyle` | Vanilla | Same host-iframe chrome. |
 | `onConfirm` | Required | `{ paymentIntentCreateAttributes, customerCreateAttributes, confirmPayment }` → create PI → `return confirmPayment(token)`. `customerCreateAttributes` is `WalletCustomerCreateAttributes`. |
 | `phoneRequired` | Top-level | Collect phone in the sheet. Default `false`. Not `buttonProps`. |
@@ -275,7 +275,7 @@ Compact Google Pay: `buttonProps: { buttonSizeMode: "static", style: { width: "2
 
 **Removed:** `onResult`, `ConfirmationResult`, `confirmPaymentIntent` / `confirmSetupIntent`, `onInitiatePaymentIntentRequest`, `fullWidth`, top-level `buttonType` / `buttonstyle` / `type` / `style` / `buttonStyle`.
 
-Wallet iframes are flush (`width: 100%`, `margin: 0`); card/bank iframes still use the 8px bleed. A button-shaped skeleton is shown immediately at `height`. The iframe stays `opacity: 0` at its default pixel height until appearance is applied, or for 1.5s after mount if appearance never acks.
+Wallet iframes are flush (zero margin) with an explicit pixel width measured from the mount slot. Card and bank frames add 8px of width so the focus ring can bleed 4px per side; the wrapper clips that bleed. A button-shaped skeleton is shown immediately at `height`. The iframe stays at opacity 1 with that pixel box, and is inert, until appearance is applied, or for 1.5s after mount if appearance never acks.
 
 ## Appearance
 
