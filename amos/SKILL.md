@@ -29,7 +29,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.30, `@amos.com/react-amos-js` 0.11.27, and `@amos.com/node` 0.1.72 (peer `>=0.1.65`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.30, `@amos.com/react-amos-js` 0.11.28, and `@amos.com/node` 0.1.72 (peer `>=0.1.65`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -261,7 +261,7 @@ mount form inside host <form> (render token) [+ onValidityChange]
 | Server | `POST /payment_intents` | `POST /setup_intents` |
 | Client confirm | `await confirmPayment({ …, token })` | `await confirmSetup({ …, token })` |
 
-**Loading skeletons (do not invent your own):** card/bank mounts show a field-shaped skeleton (sized from `appearance`, `additionalFields`, `billingAddressRequirement`). Google Pay / Apple Pay mounts show a **button-shaped** skeleton at `height` (default `"48px"`). The iframe stays at opacity 1 with an explicit pixel width and height, and is inert, until appearance is applied, or for 1.5s after mount if appearance never acks. `@amos.com/amos-js` 0.11.30 sets `sandbox` before `src` (`PAYMENT_IFRAME_SANDBOX` for card and bank; `WALLET_IFRAME_SANDBOX` also allows the payment-sheet popup). Do not set `sandbox`, `width`, or `height` on the iframe. Do not overlay a host-page placeholder or hide the mount until “ready.” When Plaid Embedded Institution Search is showing, the SDK covers that **350px** slot with the same pulse until Plaid’s `onLoad` (1.5s fallback).
+**Loading skeletons (do not invent your own):** card/bank mounts show a field-shaped skeleton (sized from `appearance`, `additionalFields`, `billingAddressRequirement`). Google Pay / Apple Pay mounts show a **button-shaped** skeleton at `height` (default `"48px"`). The iframe stays at opacity 1 with an explicit pixel width and height, and is inert, until appearance is applied, or for 1.5s after the postMessage handshake starts (`IFRAME_READY`) if appearance never acks. `@amos.com/amos-js` 0.11.30 sets `sandbox` before `src` (`PAYMENT_IFRAME_SANDBOX` for card and bank; `WALLET_IFRAME_SANDBOX` also allows the payment-sheet popup). Do not set `sandbox`, `width`, or `height` on the iframe. Do not overlay a host-page placeholder or hide the mount until “ready.” When Plaid Embedded Institution Search is showing, the SDK covers that **350px** slot with the same pulse until Plaid’s `onLoad` (1.5s fallback).
 
 ### Tabs / multiple methods (keep mounted)
 
