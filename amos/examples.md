@@ -205,7 +205,7 @@ export function CardPaymentForm({ renderToken }: { renderToken: string }) {
         renderToken={renderToken}
         additionalFields={{ cardholderName: true }}
         defaultValues={{
-          name: "Alex Example",
+          cardholderName: "Alex Example",
           billingAddress: { country: "US", postalCode: "90210" },
         }}
         onValidityChange={({ isValid }) => setIsValid(isValid)}
@@ -560,7 +560,7 @@ const bank = mountAmosBankAccountPaymentMethodForm("#bank-form", {
   requireAchVerification: true,
   // intent: "setup", // save a bank account — always Plaid unless verification is disabled
   defaultValues: {
-    name: "Alex Example",
+    accountHolderName: "Alex Example",
     billingAddress: { country: "US", postalCode: "90210" },
   },
   onValidityChange: ({ isValid }) => {

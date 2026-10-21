@@ -29,7 +29,7 @@ Same client components for both:
 
 The **Pay API HTTP contract** is the source of truth. Backend SDKs (`@amos.com/node`, Ruby, Python, Go, etc.) are OpenAPI-generated clients — or call HTTP directly.
 
-Current packages: `@amos.com/amos-js` 0.11.30, `@amos.com/react-amos-js` 0.11.28, and `@amos.com/node` 0.1.72 (peer `>=0.1.65`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
+Current packages: `@amos.com/amos-js` 0.11.33, `@amos.com/react-amos-js` 0.11.30, and `@amos.com/node` 0.1.74 (peer `>=0.1.65`). `@amos.com/node` is a **peer dependency** of both client SDKs (install it for OpenAPI types even in browser-only TypeScript). Prefer the installed package README + types over inventing APIs.
 
 ## Architecture
 
@@ -183,7 +183,7 @@ When the confirm API returned a body, the result includes `paymentIntent` or `se
 
 To clear fields and API errors without remounting (e.g. after success when starting another payment), call **`resetForm`** with the same iframe ref/element. It restores the latest mounted/updated `defaultValues`; on bank it also disconnects Plaid.
 
-**Removed (do not use):** `onResult` / `ConfirmationResult` / `incomplete`, `confirmPaymentIntent` / `confirmSetupIntent`, `onPaymentIntentConfirmationSucceeded`, `onSetupIntentConfirmationSucceeded`, `onConfirmationFailed`.
+**Removed (do not use):** `onResult` / `ConfirmationResult` / `incomplete`, `confirmPaymentIntent` / `confirmSetupIntent`, `onPaymentIntentConfirmationSucceeded`, `onSetupIntentConfirmationSucceeded`, `onConfirmationFailed`, top-level `defaultValues.name` (use `accountHolderName` or `cardholderName`).
 
 ## `onValidityChange` (card / bank)
 
@@ -305,8 +305,12 @@ Same with `mountAmosCreditCardPaymentMethodForm` / `mountAmosBankAccountPaymentM
 
 ```ts
 type PaymentMethodFormDefaultValues = {
-  name?: string;
+  accountHolderName?: string;
+  cardholderName?: string;
   billingAddress?: {
+    name?: string;
+    email?: string;
+    phone?: string;
     line1?: string;
     line2?: string;
     city?: string;
@@ -316,6 +320,8 @@ type PaymentMethodFormDefaultValues = {
   };
 };
 ```
+
+`accountHolderName` prefills the bank account holder. `cardholderName` prefills the cardholder input and is confirmed only when `additionalFields.cardholderName` is true. Billing fields, including `billingAddress.name`, `email`, and `phone`, are sent on confirm even when those inputs are hidden. Provided keys overwrite matching fields, including ones the customer already edited.
 
 - React: pass `defaultValues` to the card/bank component. Pass it to `confirmPayment` / `confirmSetup` for a one-confirm overlay that does not replace reset defaults.
 - Vanilla: pass it on mount or call `controller.update({ defaultValues })`.
@@ -396,7 +402,7 @@ Mismatch → blank iframe or method not allowed.
 | Spinner never stops | Await confirm; `succeeded`, decline `failed`, and timeout all unlock UI |
 | Confirm `failed` after ~15s / retrying a timeout | Use `isConfirmTimeout(result)`. Timeout is uncertain, not a decline — do not create a new intent and confirm again. Verify webhook / retrieve. |
 | Need to clear form after success/retry | `resetForm({ iframeRef })` / `resetForm({ iframe })` — also disconnects Plaid; do not remount unless needed |
-| Need to populate name/address | Pass `defaultValues`; never pass sensitive account/card fields |
+| Need to populate name/address | Pass `defaultValues` (`accountHolderName`, `cardholderName`, `billingAddress.name` / `email` / `phone` and street fields). Never pass sensitive account/card fields |
 | Need to focus an iframe field | React `focusField({ iframeRef, field })`; vanilla `controller.focus(field)` |
 | Pay/Save button never enables | Wire `onValidityChange({ isValid })`; still `validateForm` on submit |
 | Enter in iframe does nothing | Wrap the mount in a host `<form>` and handle `submit` (`preventDefault`). Parent `keydown` cannot see keys in the cross-origin iframe. |
@@ -434,7 +440,7 @@ Mismatch → blank iframe or method not allowed.
 2. Configure Pay API client or raw HTTP; scaffold a route that returns **only** `token`.
 3. Scaffold client checkout as a host **`<form onSubmit>`** wrapping the card/bank mount so **Enter in the iframe** submits it (Stripe pattern — no parent `keydown`, no `onSubmitRequest`). Use **`await confirmPayment` / `await confirmSetup`**. Wallets: **`onConfirm`** typed with **`WalletCustomerCreateAttributes`** that creates the intent then **`return confirmPayment(token)`**. Pass top-level **`phoneRequired`** / **`shippingAddressRequired`** when needed (default `false`). Reject create-on-open designs. On card/bank, wire **`onValidityChange`** to the host button; use `defaultValues` / `focusField` for host-driven form UX. On card, optional **`onCardBrandChanged`**. On card and bank, optional **`onPostalCodeChange`** for a finished billing postal code. In a modal, pass **`onEscapeKeyPressed`**. Style with **`appearance.fonts`**, **`--font-family`**, **`themeVariables`**, and **`rules`** — do not target the iframe DOM. On bank, set **`requireAchVerification`** from the host rule and **`intent: "setup"`** when saving. Allow Plaid CSP unless the render token disables verification. If the UI uses method tabs, mount every form and hide inactive ones with CSS.
 4. Handle `succeeded` / `failed` / **`isConfirmTimeout`**; inspect the returned intent `state` when present, and remind about dashboard origins and webhooks (`payment_intent.succeeded` / `setup_intent.succeeded`).
-5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`** + **`WalletCustomerCreateAttributes`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, card/bank `onPostalCodeChange`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps` / **`phoneRequired`** / **`shippingAddressRequired`**. Peer `@amos.com/node` `>=0.1.65` (current 0.1.72).
+5. Read installed package versions if APIs look unfamiliar. Current clients use `confirmPayment` / `confirmSetup`, `isConfirmTimeout`, wallet **`onConfirm`** + **`WalletCustomerCreateAttributes`**, host-form Enter submit, `onEscapeKeyPressed`, `appearance.fonts` / `rules` / `--font-family` (**replace** `themeVariables`), `defaultValues`, `focusField`, `onValidityChange`, card `onCardBrandChanged`, card/bank `onPostalCodeChange`, `resetForm`, bank `requireAchVerification` + `intent` (Plaid Embedded Institution Search with a 350px SDK skeleton), and wallet `height` / `buttonProps` / `iframeProps` / **`phoneRequired`** / **`shippingAddressRequired`**. Peer `@amos.com/node` `>=0.1.65` (current 0.1.74).
 
 ## Additional resources
 
